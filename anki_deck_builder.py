@@ -8,7 +8,7 @@ Builds an Anki .apkg deck from a CSV (single column of Japanese terms).
 - Fetches:
   * Kana reading + EN glosses: Jisho API
   * Example sentence (JP) + EN translation: Tatoeba API
-  * JP monolingual definition: Japanese Wikipedia extract
+  * JP monolingual definition: Japanese Wiktionary (fallback: Japanese Wikipedia)
   * Related image: Wikimedia Commons (Commons) thumbnail
 
 Requires: pip install typer[all] rich requests genanki unidecode python-slugify
@@ -47,6 +47,7 @@ HEADERS = {"User-Agent": USER_AGENT}
 
 JISHO_URL = "https://jisho.org/api/v1/search/words"
 TATOEBA_URL = "https://tatoeba.org/eng/api_v0/search"
+WIKTIONARY_JA_API = "https://ja.wiktionary.org/w/api.php"
 WIKIPEDIA_JA_API = "https://ja.wikipedia.org/w/api.php"
 COMMONS_API = "https://commons.wikimedia.org/w/api.php"
 
@@ -208,6 +209,93 @@ def fetch_tatoeba_example(term: str) -> Tuple[str, str]:
         return "", ""
 
 
+def fetch_wiktionary_ja_definition(term: str) -> str:
+    """Return a short JP definition from Japanese Wiktionary."""
+    try:
+        params = {
+            "action": "query",
+            "format": "json",
+            "prop": "extracts",
+            "explaintext": 1,
+            "redirects": 1,
+            "titles": term,
+            "formatversion": 2,
+        }
+        r = requests.get(WIKTIONARY_JA_API, params=params, headers=HEADERS, timeout=15)
+        r.raise_for_status()
+        j = r.json()
+        pages = (j.get("query", {}) or {}).get("pages", [])
+        if isinstance(pages, dict):
+            pages_list = list(pages.values())
+        else:
+            pages_list = list(pages)
+        if not pages_list:
+            return ""
+        page = pages_list[0]
+        extract = (page or {}).get("extract", "").strip()
+        if not extract:
+            return ""
+
+        lines = [line.strip() for line in extract.splitlines() if line.strip()]
+        in_japanese_section = False
+        definition = ""
+        heading_stop_words = {
+            "語源",
+            "熟語",
+            "派生語",
+            "関連語",
+            "翻訳",
+            "脚注",
+            "参照",
+            "諸言語",
+        }
+        part_of_speech_markers = {
+            "名詞",
+            "動詞",
+            "形容詞",
+            "形容動詞",
+            "副詞",
+            "助詞",
+            "助動詞",
+            "連体詞",
+            "感動詞",
+            "接続詞",
+            "接頭辞",
+            "接尾辞",
+            "形容詞語幹",
+            "固有名詞",
+        }
+
+        for line in lines:
+            if not in_japanese_section:
+                if line.startswith("日本語"):
+                    in_japanese_section = True
+                continue
+
+            if line in heading_stop_words or (line.endswith("語") and len(line) <= 4):
+                break
+
+            if line in part_of_speech_markers or line.rstrip("：:") in part_of_speech_markers:
+                continue
+
+            cleaned = line
+            cleaned = re.sub(r"^(\d+|[①-⑨]|[０-９]+)[\.．)]\s*", "", cleaned)
+            cleaned = re.sub(r"^[#・]\s*", "", cleaned)
+            cleaned = cleaned.strip()
+            if cleaned:
+                definition = cleaned
+                break
+
+        if not definition:
+            sentences = re.split(r"(?<=。)", extract)
+            definition = sentences[0].strip() if sentences else extract
+
+        return definition[:400]
+    except Exception as e:
+        console.log(f"[yellow]Wiktionary fetch failed for '{term}': {e}")
+        return ""
+
+
 def fetch_wikipedia_ja_definition(term: str) -> str:
     """Return a short JP extract from Japanese Wikipedia (if any)."""
     try:
@@ -338,7 +426,9 @@ def make_note(model: genanki.Model, cd: CardData) -> genanki.Note:
 def gather_for_term(term: str, media_dir: Path) -> CardData:
     reading, english = fetch_jisho(term)
     jp_ex, en_ex = fetch_tatoeba_example(term)
-    defi = fetch_wikipedia_ja_definition(term)
+    defi = fetch_wiktionary_ja_definition(term)
+    if not defi:
+        defi = fetch_wikipedia_ja_definition(term)
     img = fetch_commons_image(term, media_dir)
     return CardData(term=term, reading=reading, english=english, sentence_jp=jp_ex, sentence_en=en_ex, definition_ja=defi, image_filename=img)
 
