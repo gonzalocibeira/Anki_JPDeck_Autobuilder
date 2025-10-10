@@ -433,12 +433,10 @@ def build_model(model_id: int, name: str = DEFAULT_MODEL_NAME) -> genanki.Model:
 {{FrontSide}}
 <hr id='answer'>
 <div class='back'>
-  <div class='en'><b>English:</b> {{English}}</div>
+  <div class='en'><b>Meaning:</b> {{English}}</div>
   <div class='ex'><b>例文:</b> {{SentenceJP}}</div>
-  <div class='ex'><b>EN:</b> {{SentenceEN}}</div>
-  {{#DefinitionJP}}
-  <div class='def'><b>国語:</b> {{DefinitionJP}}</div>
-  {{/DefinitionJP}}
+  <div class='ex'><b>E.g.:</b> {{SentenceEN}}</div>
+  <div class='ex'><b>JP Dict:</b> {{DefinitionJP}}</div>
 </div>
 """,
         }
