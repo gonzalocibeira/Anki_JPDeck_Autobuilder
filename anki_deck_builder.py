@@ -34,7 +34,14 @@ except ModuleNotFoundError:  # pragma: no cover - handled gracefully for optiona
     requests = None  # type: ignore
 import typer
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
+from rich.progress import (
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    BarColumn,
+    TimeElapsedColumn,
+    TimeRemainingColumn,
+)
 from rich.table import Table
 from slugify import slugify
 import genanki
@@ -582,6 +589,7 @@ def build(
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),
         TimeElapsedColumn(),
+        TimeRemainingColumn(),
         console=console,
     ) as progress:
         task = progress.add_task("Fetching data...", total=len(terms))
