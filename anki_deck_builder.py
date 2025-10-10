@@ -356,7 +356,9 @@ def load_config(config_path: Path) -> Tuple[int, int, str]:
 @app.command()
 def build(
     csv_path: str = typer.Option(..., prompt=True, help="Path to CSV with one Japanese term per row."),
-    output_dir: str = typer.Option("./out", help="Where to save the .apkg and media."),
+    output_dir: str = typer.Option(
+        "./out", prompt="Output directory", help="Where to save the .apkg and media."
+    ),
     new_deck: bool = typer.Option(True, help="Create a new deck (True) or append to an existing Anki deck by reusing IDs (False)."),
     deck_name: str = typer.Option(DEFAULT_DECK_NAME, help="Deck name (used for new deck or when overriding config)."),
     config: Optional[str] = typer.Option(None, help=f"Config JSON with deck_id/model_id (default: {CONFIG_FILE})."),
