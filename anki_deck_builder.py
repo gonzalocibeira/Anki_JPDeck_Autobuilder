@@ -429,7 +429,26 @@ def gather_for_term(term: str, media_dir: Path) -> CardData:
     defi = fetch_wiktionary_ja_definition(term)
     if not defi:
         defi = fetch_wikipedia_ja_definition(term)
-    img = fetch_commons_image(term, media_dir)
+    search_terms: List[str] = [term]
+    if reading and reading not in search_terms:
+        search_terms.append(reading)
+
+    if english:
+        # Use the first few English gloss candidates as fallbacks for image lookup.
+        english_candidates = [
+            e.strip() for e in re.split(r"(?i)[;,/]|\band\b", english) if e.strip()
+        ]
+        for candidate in english_candidates:
+            if candidate not in search_terms:
+                search_terms.append(candidate)
+            if len(search_terms) >= 5:
+                break
+
+    img = ""
+    for candidate in search_terms:
+        img = fetch_commons_image(candidate, media_dir)
+        if img:
+            break
     return CardData(term=term, reading=reading, english=english, sentence_jp=jp_ex, sentence_en=en_ex, definition_ja=defi, image_filename=img)
 
 
