@@ -136,10 +136,14 @@ def deterministic_guid(*parts: str) -> int:
 # Fetchers (no-auth public sources)
 # -----------------------------
 
-def fetch_jisho(term: str) -> Tuple[str, str]:
+def fetch_jisho(term: str, debug: bool = False) -> Tuple[str, str]:
     """Return (reading_kana, english_glosses) from Jisho for a term."""
     try:
         resp = requests.get(JISHO_URL, params={"keyword": term}, headers=HEADERS, timeout=15)
+        if debug:
+            console.log(
+                f"[cyan]DEBUG Jisho response for '{term}':[/] {resp.text}"
+            )
         resp.raise_for_status()
         data = resp.json()
         if not data.get("data"):
@@ -164,7 +168,7 @@ def fetch_jisho(term: str) -> Tuple[str, str]:
         return "", ""
 
 
-def fetch_tatoeba_example(term: str) -> Tuple[str, str]:
+def fetch_tatoeba_example(term: str, debug: bool = False) -> Tuple[str, str]:
     """Return (jp_sentence, en_translation) from Tatoeba.
     Handles API shapes where 'translations' may be a list of dicts or grouped lists.
     """
@@ -179,6 +183,10 @@ def fetch_tatoeba_example(term: str) -> Tuple[str, str]:
         }
         r = requests.get(TATOEBA_URL, params=params, headers=HEADERS, timeout=20)
         r.raise_for_status()
+        if debug:
+            console.log(
+                f"[cyan]DEBUG Tatoeba response for '{term}':[/] {r.text}"
+            )
         j = r.json()
         results = j.get("results", [])
         if not isinstance(results, list):
@@ -213,7 +221,7 @@ def fetch_tatoeba_example(term: str) -> Tuple[str, str]:
         return "", ""
 
 
-def fetch_goo_ja_definition(term: str) -> str:
+def fetch_goo_ja_definition(term: str, debug: bool = False) -> str:
     """Return a short JP definition from Goo's 国語 dictionary."""
     encoded = quote(term, safe="")
     for url_template in (GOO_DICTIONARY_ENTRY_URL, GOO_DICTIONARY_SEARCH_URL):
@@ -221,6 +229,10 @@ def fetch_goo_ja_definition(term: str) -> str:
         try:
             resp = requests.get(url, headers=HEADERS, timeout=15)
             resp.raise_for_status()
+            if debug:
+                console.log(
+                    f"[cyan]DEBUG Goo response for '{term}' at {url}:[/] {resp.text}"
+                )
         except Exception as e:
             console.log(f"[yellow]Goo dictionary fetch failed for '{term}' at {url}: {e}")
             continue
@@ -231,7 +243,7 @@ def fetch_goo_ja_definition(term: str) -> str:
     return ""
 
 
-def fetch_wikipedia_ja_definition(term: str) -> str:
+def fetch_wikipedia_ja_definition(term: str, debug: bool = False) -> str:
     """Return a short JP extract from Japanese Wikipedia (if any)."""
     try:
         params = {
@@ -245,6 +257,10 @@ def fetch_wikipedia_ja_definition(term: str) -> str:
         }
         r = requests.get(WIKIPEDIA_JA_API, params=params, headers=HEADERS, timeout=15)
         r.raise_for_status()
+        if debug:
+            console.log(
+                f"[cyan]DEBUG Wikipedia JA response for '{term}':[/] {r.text}"
+            )
         j = r.json()
         pages = (j.get("query", {}) or {}).get("pages", {})
         if not pages:
@@ -358,12 +374,28 @@ def make_note(model: genanki.Model, cd: CardData) -> genanki.Note:
 # Main logic
 # -----------------------------
 
-def gather_for_term(term: str, media_dir: Path) -> CardData:
-    reading, english = fetch_jisho(term)
-    jp_ex, en_ex = fetch_tatoeba_example(term)
-    defi = fetch_goo_ja_definition(term)
+def gather_for_term(term: str, media_dir: Path, debug: bool = False) -> CardData:
+    reading, english = fetch_jisho(term, debug=debug)
+    if debug:
+        console.log(
+            f"[magenta]DEBUG Parsed Jisho for '{term}': reading={reading!r}, english={english!r}"
+        )
+    jp_ex, en_ex = fetch_tatoeba_example(term, debug=debug)
+    if debug:
+        console.log(
+            f"[magenta]DEBUG Parsed Tatoeba for '{term}': sentence_jp={jp_ex!r}, sentence_en={en_ex!r}"
+        )
+    defi = fetch_goo_ja_definition(term, debug=debug)
+    if debug:
+        console.log(
+            f"[magenta]DEBUG Parsed Goo definition for '{term}': definition={defi!r}"
+        )
     if not defi:
-        defi = fetch_wikipedia_ja_definition(term)
+        defi = fetch_wikipedia_ja_definition(term, debug=debug)
+        if debug:
+            console.log(
+                f"[magenta]DEBUG Parsed Wikipedia definition for '{term}': definition={defi!r}"
+            )
     search_terms: List[str] = [term]
     if reading and reading not in search_terms:
         search_terms.append(reading)
@@ -410,6 +442,7 @@ def build(
         help="Deck name (used for new deck or when overriding config).",
     ),
     config: Optional[str] = typer.Option(None, help=f"Config JSON with deck_id/model_id (default: {CONFIG_FILE})."),
+    debug: bool = typer.Option(False, "--debug", help="Print raw API responses and parsed text values."),
 ):
     """Build or append an Anki deck from a CSV list of Japanese terms."""
     out_dir = Path(output_dir)
@@ -458,7 +491,7 @@ def build(
     ) as progress:
         task = progress.add_task("Fetching data...", total=len(terms))
         for term in terms:
-            cd = gather_for_term(term, media_dir)
+            cd = gather_for_term(term, media_dir, debug=debug)
             card_data_list.append(cd)
             if cd.image_filename:
                 media_files.append(str(media_dir / cd.image_filename))
