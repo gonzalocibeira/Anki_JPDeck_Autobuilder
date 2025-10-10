@@ -36,6 +36,8 @@ from slugify import slugify
 import genanki
 from unidecode import unidecode
 
+from wiktionary_parser import extract_first_japanese_definition
+
 app = typer.Typer(add_completion=False)
 console = Console()
 
@@ -236,60 +238,7 @@ def fetch_wiktionary_ja_definition(term: str) -> str:
         if not extract:
             return ""
 
-        lines = [line.strip() for line in extract.splitlines() if line.strip()]
-        in_japanese_section = False
-        definition = ""
-        heading_stop_words = {
-            "語源",
-            "熟語",
-            "派生語",
-            "関連語",
-            "翻訳",
-            "脚注",
-            "参照",
-            "諸言語",
-        }
-        part_of_speech_markers = {
-            "名詞",
-            "動詞",
-            "形容詞",
-            "形容動詞",
-            "副詞",
-            "助詞",
-            "助動詞",
-            "連体詞",
-            "感動詞",
-            "接続詞",
-            "接頭辞",
-            "接尾辞",
-            "形容詞語幹",
-            "固有名詞",
-        }
-
-        for line in lines:
-            if not in_japanese_section:
-                if line.startswith("日本語"):
-                    in_japanese_section = True
-                continue
-
-            if line in heading_stop_words or (line.endswith("語") and len(line) <= 4):
-                break
-
-            if line in part_of_speech_markers or line.rstrip("：:") in part_of_speech_markers:
-                continue
-
-            cleaned = line
-            cleaned = re.sub(r"^(\d+|[①-⑨]|[０-９]+)[\.．)]\s*", "", cleaned)
-            cleaned = re.sub(r"^[#・]\s*", "", cleaned)
-            cleaned = cleaned.strip()
-            if cleaned:
-                definition = cleaned
-                break
-
-        if not definition:
-            sentences = re.split(r"(?<=。)", extract)
-            definition = sentences[0].strip() if sentences else extract
-
+        definition = extract_first_japanese_definition(extract)
         return definition[:400]
     except Exception as e:
         console.log(f"[yellow]Wiktionary fetch failed for '{term}': {e}")
