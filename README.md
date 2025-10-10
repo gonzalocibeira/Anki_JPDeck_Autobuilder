@@ -1,11 +1,11 @@
 # Anki JP Deck Autobuilder
 
-Anki JP Deck Autobuilder is a command-line utility that assembles a multimedia Anki deck from a list of Japanese terms. Given a CSV file that contains the vocabulary you want to study, the tool enriches each term with readings, glosses, example sentences, native-language definitions, and an illustrative image gathered from public web APIs. The resulting content is packaged into an `.apkg` file that can be imported directly into Anki.
+Anki JP Deck Autobuilder is a command-line utility that assembles a multimedia Anki deck from a list of Japanese terms. Given a CSV file that contains the vocabulary you want to study, the tool enriches each term with readings, glosses, example sentences, native-language definitions, and an illustrative image gathered from public web APIs (Jisho, Tatoeba, Goo dictionary, Wikimedia Commons, and Japanese Wikipedia). The resulting content is packaged into an `.apkg` file that can be imported directly into Anki.
 
 ## Features
 
 - **CSV ingestion** – Reads a single-column CSV (any common delimiter) containing Japanese terms.
-- **Automated enrichment** – Queries several public APIs to supplement each term with kana readings, English glosses, example sentences, monolingual definitions, and related imagery.
+- **Automated enrichment** – Queries several public APIs (Jisho, Tatoeba, Goo dictionary, Wikimedia Commons, and Japanese Wikipedia) to supplement each term with kana readings, English glosses, example sentences, monolingual definitions, and related imagery.
 - **Deck append support** – Reuses stored deck/model IDs so newly generated cards merge with an existing deck when imported into Anki.
 - **Progress feedback** – Displays a Rich-powered progress bar and build summary in the terminal.
 - **Media packaging** – Downloads image assets and bundles them alongside the deck for a ready-to-import `.apkg`.
@@ -54,8 +54,8 @@ Running the tool produces the following artifacts inside the chosen output direc
 2. **Enrich data** (per term):
    - `fetch_jisho` queries the Jisho API for kana readings and English definitions.
    - `fetch_tatoeba_example` retrieves a Japanese example sentence and its English translation from Tatoeba.
-   - `fetch_wiktionary_ja_definition` attempts to pull a Japanese definition from Wiktionary. If that fails, `fetch_wikipedia_ja_definition` falls back to Japanese Wikipedia.
-   - `fetch_commons_image` searches Wikimedia Commons for a representative image, downloading the first suitable thumbnail.
+   - `fetch_goo_ja_definition` fetches a concise Japanese definition from the Goo 国語 dictionary (trying both direct entry pages and site-wide search). If Goo lacks a result, `fetch_wikipedia_ja_definition` falls back to Japanese Wikipedia for a short extract.
+   - `fetch_commons_image` searches Wikimedia Commons for a representative image, downloading the first suitable thumbnail. The lookup adapts by trying the original term, its reading, and the leading English glosses until an image is found.
 3. **Assemble card data** – The collected fields are wrapped in a `CardData` dataclass, which formats the Anki note fields (including an `<img>` tag when an image is available).
 4. **Configure deck** – If `--new-deck` is enabled (default), fresh deck/model IDs are generated and persisted to `anki_deck_builder.config.json`. Otherwise, existing IDs are loaded so new notes merge with an existing deck on import.
 5. **Build notes** – The script iterates over the enriched cards, creating `genanki.Note` instances using a predefined model that renders the front/back layout.
@@ -112,7 +112,7 @@ The config file is a simple JSON document that stores identifiers used by Anki t
 
 ## Limitations
 
-- The tool depends on the uptime and rate limits of third-party APIs (Jisho, Tatoeba, Wiktionary, Wikipedia, Wikimedia Commons).
+- The tool depends on the uptime and rate limits of third-party APIs (Jisho, Tatoeba, Goo dictionary, Japanese Wikipedia, Wikimedia Commons).
 - Only a single card template is provided (front: expression/reading/image, back: English gloss, sentences, definition).
 - Definitions and example sentences may not always be available for every term.
 
