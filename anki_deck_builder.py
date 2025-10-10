@@ -422,22 +422,25 @@ def build_model(model_id: int, name: str = DEFAULT_MODEL_NAME) -> genanki.Model:
     templates = [
         {
             "name": "Card 1",
-            "qfmt": (
-                "<div class='front'>"
-                "<div class='jp'>{{Expression}}</div>"
-                "<div class='reading'>{{Reading}}</div>"
-                "<div class='img'>{{Image}}</div>"
-                "</div>"
-            ),
-            "afmt": (
-                "{{FrontSide}}<hr id='answer'>"
-                "<div class='back'>"
-                "<div class='en'><b>English:</b> {{English}}</div>"
-                "<div class='ex'><b>例文:</b> {{SentenceJP}}</div>"
-                "<div class='ex'><b>EN:</b> {{SentenceEN}}</div>"
-                "<div class='def'><b>国語:</b> {{DefinitionJP}}</div>"
-                "</div>"
-            ),
+            "qfmt": """\
+<div class='front'>
+  <div class='jp'>{{Expression}}</div>
+  <div class='reading'>{{Reading}}</div>
+  <div class='img'>{{Image}}</div>
+</div>
+""",
+            "afmt": """\
+{{FrontSide}}
+<hr id='answer'>
+<div class='back'>
+  <div class='en'><b>English:</b> {{English}}</div>
+  <div class='ex'><b>例文:</b> {{SentenceJP}}</div>
+  <div class='ex'><b>EN:</b> {{SentenceEN}}</div>
+  {{#DefinitionJP}}
+  <div class='def'><b>国語:</b> {{DefinitionJP}}</div>
+  {{/DefinitionJP}}
+</div>
+""",
         }
     ]
     return genanki.Model(model_id, name, fields=fields, templates=templates, css=css)
