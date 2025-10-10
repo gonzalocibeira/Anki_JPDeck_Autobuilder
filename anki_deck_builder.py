@@ -8,7 +8,7 @@ Builds an Anki .apkg deck from a CSV (single column of Japanese terms).
 - Fetches:
   * Kana reading + EN glosses: Jisho API
   * Example sentence (JP) + EN translation: Tatoeba API
-  * JP monolingual definition: Japanese Wiktionary (fallback: Japanese Wikipedia)
+  * JP monolingual definition: Goo 国語 dictionary (fallback: Japanese Wikipedia)
   * Related image: Wikimedia Commons (Commons) thumbnail
 
 Requires: pip install typer[all] rich requests genanki unidecode python-slugify
@@ -26,6 +26,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import quote
 
 import requests
 import typer
@@ -36,7 +37,7 @@ from slugify import slugify
 import genanki
 from unidecode import unidecode
 
-from wiktionary_parser import extract_first_japanese_definition
+from goo_dictionary import extract_first_goo_definition
 
 app = typer.Typer(add_completion=False)
 console = Console()
@@ -49,7 +50,8 @@ HEADERS = {"User-Agent": USER_AGENT}
 
 JISHO_URL = "https://jisho.org/api/v1/search/words"
 TATOEBA_URL = "https://tatoeba.org/eng/api_v0/search"
-WIKTIONARY_JA_API = "https://ja.wiktionary.org/w/api.php"
+GOO_DICTIONARY_ENTRY_URL = "https://dictionary.goo.ne.jp/word/{term}/"
+GOO_DICTIONARY_SEARCH_URL = "https://dictionary.goo.ne.jp/srch/all/{term}/m0u/"
 WIKIPEDIA_JA_API = "https://ja.wikipedia.org/w/api.php"
 COMMONS_API = "https://commons.wikimedia.org/w/api.php"
 
@@ -211,38 +213,22 @@ def fetch_tatoeba_example(term: str) -> Tuple[str, str]:
         return "", ""
 
 
-def fetch_wiktionary_ja_definition(term: str) -> str:
-    """Return a short JP definition from Japanese Wiktionary."""
-    try:
-        params = {
-            "action": "query",
-            "format": "json",
-            "prop": "extracts",
-            "explaintext": 1,
-            "redirects": 1,
-            "titles": term,
-            "formatversion": 2,
-        }
-        r = requests.get(WIKTIONARY_JA_API, params=params, headers=HEADERS, timeout=15)
-        r.raise_for_status()
-        j = r.json()
-        pages = (j.get("query", {}) or {}).get("pages", [])
-        if isinstance(pages, dict):
-            pages_list = list(pages.values())
-        else:
-            pages_list = list(pages)
-        if not pages_list:
-            return ""
-        page = pages_list[0]
-        extract = (page or {}).get("extract", "").strip()
-        if not extract:
-            return ""
+def fetch_goo_ja_definition(term: str) -> str:
+    """Return a short JP definition from Goo's 国語 dictionary."""
+    encoded = quote(term, safe="")
+    for url_template in (GOO_DICTIONARY_ENTRY_URL, GOO_DICTIONARY_SEARCH_URL):
+        url = url_template.format(term=encoded)
+        try:
+            resp = requests.get(url, headers=HEADERS, timeout=15)
+            resp.raise_for_status()
+        except Exception as e:
+            console.log(f"[yellow]Goo dictionary fetch failed for '{term}' at {url}: {e}")
+            continue
 
-        definition = extract_first_japanese_definition(extract)
-        return definition[:400]
-    except Exception as e:
-        console.log(f"[yellow]Wiktionary fetch failed for '{term}': {e}")
-        return ""
+        definition = extract_first_goo_definition(resp.text)
+        if definition:
+            return definition[:400]
+    return ""
 
 
 def fetch_wikipedia_ja_definition(term: str) -> str:
@@ -375,7 +361,7 @@ def make_note(model: genanki.Model, cd: CardData) -> genanki.Note:
 def gather_for_term(term: str, media_dir: Path) -> CardData:
     reading, english = fetch_jisho(term)
     jp_ex, en_ex = fetch_tatoeba_example(term)
-    defi = fetch_wiktionary_ja_definition(term)
+    defi = fetch_goo_ja_definition(term)
     if not defi:
         defi = fetch_wikipedia_ja_definition(term)
     search_terms: List[str] = [term]
