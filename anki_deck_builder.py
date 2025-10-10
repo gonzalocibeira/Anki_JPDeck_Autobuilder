@@ -404,7 +404,11 @@ def build(
         "./out", prompt="Output directory", help="Where to save the .apkg and media."
     ),
     new_deck: bool = typer.Option(True, help="Create a new deck (True) or append to an existing Anki deck by reusing IDs (False)."),
-    deck_name: str = typer.Option(DEFAULT_DECK_NAME, help="Deck name (used for new deck or when overriding config)."),
+    deck_name: str = typer.Option(
+        DEFAULT_DECK_NAME,
+        prompt="Deck name",
+        help="Deck name (used for new deck or when overriding config).",
+    ),
     config: Optional[str] = typer.Option(None, help=f"Config JSON with deck_id/model_id (default: {CONFIG_FILE})."),
 ):
     """Build or append an Anki deck from a CSV list of Japanese terms."""
