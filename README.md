@@ -5,7 +5,7 @@ Anki JP Deck Autobuilder is a command-line utility that assembles a multimedia A
 ## Features
 
 - **CSV ingestion** – Reads a single-column CSV (any common delimiter) containing Japanese terms.
-- **Automated enrichment** – Queries several public APIs (Jisho, Tatoeba, Goo dictionary, Wikimedia Commons, and Japanese Wikipedia) to supplement each term with kana readings, English glosses, example sentences, monolingual definitions, and related imagery.
+- **Automated enrichment** – Queries several public APIs (Jisho, Tatoeba, Japanese Wikipedia, Goo dictionary, and Wikimedia Commons) to supplement each term with kana readings, English glosses, example sentences, monolingual definitions, and related imagery.
 - **Deck append support** – Reuses stored deck/model IDs so newly generated cards merge with an existing deck when imported into Anki.
 - **Progress feedback** – Displays a Rich-powered progress bar and build summary in the terminal.
 - **Media packaging** – Downloads image assets and bundles them alongside the deck for a ready-to-import `.apkg`.
@@ -54,7 +54,7 @@ Running the tool produces the following artifacts inside the chosen output direc
 2. **Enrich data** (per term):
    - `fetch_jisho` queries the Jisho API for kana readings and English definitions.
    - `fetch_tatoeba_example` retrieves a Japanese example sentence and its English translation from Tatoeba.
-   - `fetch_goo_ja_definition` fetches a concise Japanese definition from the Goo 国語 dictionary (trying both direct entry pages and site-wide search). If Goo lacks a result, `fetch_wikipedia_ja_definition` falls back to Japanese Wikipedia for a short extract.
+- `fetch_wikipedia_ja_definition` retrieves the introductory extract from Japanese Wikipedia and trims filler text for a concise definition. If Wikipedia lacks a result, `fetch_goo_ja_definition` falls back to the Goo 国語 dictionary for a short definition.
    - `fetch_commons_image` searches Wikimedia Commons for a representative image, downloading the first suitable thumbnail. The lookup adapts by trying the original term, its reading, and the leading English glosses until an image is found.
 3. **Assemble card data** – The collected fields are wrapped in a `CardData` dataclass, which formats the Anki note fields (including an `<img>` tag when an image is available).
 4. **Configure deck** – If `--new-deck` is enabled (default), fresh deck/model IDs are generated and persisted to `anki_deck_builder.config.json`. Otherwise, existing IDs are loaded so new notes merge with an existing deck on import.
