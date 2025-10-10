@@ -8,7 +8,7 @@ Builds an Anki .apkg deck from a CSV (single column of Japanese terms).
 - Fetches:
   * Kana reading + EN glosses: Jisho API
   * Example sentence (JP) + EN translation: Tatoeba API
-  * JP monolingual definition: Goo 国語 dictionary (fallback: Japanese Wikipedia)
+  * JP monolingual definition: Japanese Wikipedia (fallback: Goo 国語 dictionary)
   * Related image: Wikimedia Commons (Commons) thumbnail
 
 Requires: pip install typer[all] rich requests genanki unidecode python-slugify
@@ -28,7 +28,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
-import requests
+try:
+    import requests  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover - handled gracefully for optional deps
+    requests = None  # type: ignore
 import typer
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
@@ -38,6 +41,7 @@ import genanki
 from unidecode import unidecode
 
 from goo_dictionary import extract_first_goo_definition
+from wikipedia_utils import clean_wikipedia_extract
 
 app = typer.Typer(add_completion=False)
 console = Console()
@@ -152,8 +156,16 @@ def _debug_print(source: str, term: str, payload: Any, *, limit: int = 600) -> N
     console.log(f"[cyan]DEBUG {source} response for '{term}':[/] {normalized}")
 
 
+def _require_requests() -> None:
+    if requests is None:  # pragma: no cover - triggered only when dependency missing
+        raise RuntimeError(
+            "The 'requests' package is required for network operations. Install it via 'pip install requests'."
+        )
+
+
 def fetch_jisho(term: str, debug: bool = False) -> Tuple[str, str]:
     """Return (reading_kana, english_glosses) from Jisho for a term."""
+    _require_requests()
     try:
         resp = requests.get(JISHO_URL, params={"keyword": term}, headers=HEADERS, timeout=15)
         if debug:
@@ -204,6 +216,7 @@ def fetch_tatoeba_example(term: str, debug: bool = False) -> Tuple[str, str]:
     """Return (jp_sentence, en_translation) from Tatoeba.
     Handles API shapes where 'translations' may be a list of dicts or grouped lists.
     """
+    _require_requests()
     try:
         params = {
             "from": "jpn",
@@ -292,6 +305,7 @@ def fetch_tatoeba_example(term: str, debug: bool = False) -> Tuple[str, str]:
 
 def fetch_goo_ja_definition(term: str, debug: bool = False) -> str:
     """Return a short JP definition from Goo's 国語 dictionary."""
+    _require_requests()
     encoded = quote(term, safe="")
     for url_template in (GOO_DICTIONARY_ENTRY_URL, GOO_DICTIONARY_SEARCH_URL):
         url = url_template.format(term=encoded)
@@ -312,6 +326,7 @@ def fetch_goo_ja_definition(term: str, debug: bool = False) -> str:
 
 def fetch_wikipedia_ja_definition(term: str, debug: bool = False) -> str:
     """Return a short JP extract from Japanese Wikipedia (if any)."""
+    _require_requests()
     try:
         params = {
             "action": "query",
@@ -344,11 +359,9 @@ def fetch_wikipedia_ja_definition(term: str, debug: bool = False) -> str:
         if not pages:
             return ""
         page = next(iter(pages.values()))
-        extract = (page or {}).get("extract", "").strip()
-        # Keep only the first sentence for brevity
+        extract = (page or {}).get("extract", "")
         if extract:
-            m = re.split(r"(?<=。)", extract)
-            return (m[0] if m else extract)[:400]
+            return clean_wikipedia_extract(extract)
         return ""
     except Exception as e:
         console.log(f"[yellow]Wikipedia JA fetch failed for '{term}': {e}")
@@ -357,6 +370,7 @@ def fetch_wikipedia_ja_definition(term: str, debug: bool = False) -> str:
 
 def fetch_commons_image(term: str, media_dir: Path) -> str:
     """Download first Commons image matching the term. Return local filename or ''."""
+    _require_requests()
     try:
         params = {
             "action": "query",
@@ -464,16 +478,16 @@ def gather_for_term(term: str, media_dir: Path, debug: bool = False) -> CardData
         console.log(
             f"[magenta]DEBUG Parsed Tatoeba for '{term}': sentence_jp={jp_ex!r}, sentence_en={en_ex!r}"
         )
-    defi = fetch_goo_ja_definition(term, debug=debug)
+    defi = fetch_wikipedia_ja_definition(term, debug=debug)
     if debug:
         console.log(
-            f"[magenta]DEBUG Parsed Goo definition for '{term}': definition={defi!r}"
+            f"[magenta]DEBUG Parsed Wikipedia definition for '{term}': definition={defi!r}"
         )
     if not defi:
-        defi = fetch_wikipedia_ja_definition(term, debug=debug)
+        defi = fetch_goo_ja_definition(term, debug=debug)
         if debug:
             console.log(
-                f"[magenta]DEBUG Parsed Wikipedia definition for '{term}': definition={defi!r}"
+                f"[magenta]DEBUG Parsed Goo definition for '{term}': definition={defi!r}"
             )
     search_terms: List[str] = [term]
     if reading and reading not in search_terms:
