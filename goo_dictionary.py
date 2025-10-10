@@ -22,6 +22,12 @@ _META_DESC_RE = re.compile(
 
 _DICTIONARY_TYPES = {"DefinedTerm", "DictionaryEntry", "Article", "Sense"}
 
+_NOISE_SNIPPETS = (
+    "サービス終了のお知らせ",
+    "教えて!goo",
+    "gooランキング",
+)
+
 
 def extract_first_definition_from_json_ld(html: str) -> str:
     """Return the first description entry from Goo's JSON-LD payload, if present."""
@@ -36,13 +42,15 @@ def extract_first_definition_from_json_ld(html: str) -> str:
         fallback: str = ""
         for description, priority in _iter_json_descriptions(data):
             cleaned = _clean_text(description)
-            if not cleaned:
+            if not cleaned or _is_noise_definition(cleaned):
                 continue
             if priority == 0:
                 return cleaned
             if not fallback:
                 fallback = cleaned
         if fallback:
+            if _is_noise_definition(fallback):
+                continue
             return fallback
     return ""
 
@@ -68,11 +76,13 @@ def extract_first_definition_from_html_blocks(html: str) -> str:
     cleaned_html = re.sub(r"<!--.*?-->", "", html, flags=re.DOTALL)
     for block in _HTML_BLOCK_RE.findall(cleaned_html):
         cleaned = _clean_html_fragment(block)
-        if cleaned:
+        if cleaned and not _is_noise_definition(cleaned):
             return cleaned
     meta = _META_DESC_RE.search(cleaned_html)
     if meta:
-        return _clean_text(meta.group(1))
+        cleaned_meta = _clean_text(meta.group(1))
+        if not _is_noise_definition(cleaned_meta):
+            return cleaned_meta
     return ""
 
 
@@ -103,6 +113,15 @@ def _clean_text(text: str) -> str:
     filtered = [line for line in lines if line]
     result = " ".join(filtered).strip()
     return result
+
+
+def _is_noise_definition(text: str) -> bool:
+    if not text:
+        return True
+    for snippet in _NOISE_SNIPPETS:
+        if snippet in text:
+            return True
+    return False
 
 
 __all__ = ["extract_first_goo_definition"]

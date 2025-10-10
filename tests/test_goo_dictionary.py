@@ -59,6 +59,25 @@ class GooDictionaryExtractionTests(unittest.TestCase):
         html = "<html><body><p>no dictionary data</p></body></html>"
         self.assertEqual(extract_first_goo_definition(html), "")
 
+    def test_ignores_service_shutdown_notice(self):
+        html = """
+        <script type="application/ld+json">
+        {
+            "@context": "http://schema.org",
+            "@type": "DefinedTerm",
+            "name": "dummy",
+            "description": "教えて!goo、gooランキング サービス終了のお知らせ"
+        }
+        </script>
+        <div class="meaning">
+            <p>本来の定義がここに表示される。</p>
+        </div>
+        """
+        self.assertEqual(
+            extract_first_goo_definition(html),
+            "本来の定義がここに表示される。",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
