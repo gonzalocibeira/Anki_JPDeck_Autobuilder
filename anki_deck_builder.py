@@ -156,6 +156,10 @@ def fetch_jisho(term: str, debug: bool = False) -> Tuple[str, str]:
     """Return (reading_kana, english_glosses) from Jisho for a term."""
     try:
         resp = requests.get(JISHO_URL, params={"keyword": term}, headers=HEADERS, timeout=15)
+        if debug:
+            console.log(
+                f"[cyan]DEBUG Jisho response for '{term}':[/] {resp.text}"
+            )
         resp.raise_for_status()
         data = resp.json()
         if debug:
@@ -211,6 +215,10 @@ def fetch_tatoeba_example(term: str, debug: bool = False) -> Tuple[str, str]:
         }
         r = requests.get(TATOEBA_URL, params=params, headers=HEADERS, timeout=20)
         r.raise_for_status()
+        if debug:
+            console.log(
+                f"[cyan]DEBUG Tatoeba response for '{term}':[/] {r.text}"
+            )
         j = r.json()
         if debug:
             sample_result: Dict[str, Any] = {}
@@ -316,6 +324,10 @@ def fetch_wikipedia_ja_definition(term: str, debug: bool = False) -> str:
         }
         r = requests.get(WIKIPEDIA_JA_API, params=params, headers=HEADERS, timeout=15)
         r.raise_for_status()
+        if debug:
+            console.log(
+                f"[cyan]DEBUG Wikipedia JA response for '{term}':[/] {r.text}"
+            )
         j = r.json()
         if debug:
             pages = (j.get("query", {}) or {}).get("pages", {})
