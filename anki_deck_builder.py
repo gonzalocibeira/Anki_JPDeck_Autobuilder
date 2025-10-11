@@ -9,7 +9,7 @@ Builds an Anki .apkg deck from a CSV (single column of Japanese terms).
   * Kana reading + EN glosses: Jisho API
   * Example sentence (JP) + EN translation: Tatoeba API
   * JP monolingual definition: Japanese Wikipedia (fallback: Goo 国語 dictionary)
-  * Related image: Wikimedia Commons (Commons) thumbnail
+  * Related image: DuckDuckGo image search thumbnail
 
 Requires: pip install typer[all] rich requests genanki unidecode python-slugify
 """
@@ -64,7 +64,7 @@ TATOEBA_URL = "https://tatoeba.org/eng/api_v0/search"
 GOO_DICTIONARY_ENTRY_URL = "https://dictionary.goo.ne.jp/word/{term}/"
 GOO_DICTIONARY_SEARCH_URL = "https://dictionary.goo.ne.jp/srch/all/{term}/m0u/"
 WIKIPEDIA_JA_API = "https://ja.wikipedia.org/w/api.php"
-COMMONS_API = "https://commons.wikimedia.org/w/api.php"
+DUCKDUCKGO_BASE = "https://duckduckgo.com/"
 
 DEFAULT_MODEL_NAME = "JP Word w/ Image + Examples (MVP)"
 DEFAULT_DECK_NAME = "Japanese Auto Deck"
@@ -375,36 +375,52 @@ def fetch_wikipedia_ja_definition(term: str, debug: bool = False) -> str:
         return ""
 
 
-def fetch_commons_image(term: str, media_dir: Path) -> str:
-    """Download first Commons image matching the term. Return local filename or ''."""
+def fetch_duckduckgo_image(term: str, media_dir: Path) -> str:
+    """Download first DuckDuckGo image search result. Return local filename or ''."""
     _require_requests()
     try:
-        params = {
-            "action": "query",
-            "format": "json",
-            "generator": "search",
-            "gsrsearch": term,
-            "gsrnamespace": 6,  # File namespace
-            "gsrlimit": 1,
-            "prop": "imageinfo",
-            "iiprop": "url",
-            "iiurlwidth": 600,
-        }
-        r = requests.get(COMMONS_API, params=params, headers=HEADERS, timeout=20)
-        r.raise_for_status()
-        j = r.json()
-        pages = (j.get("query", {}) or {}).get("pages", {})
-        if not pages:
+        search_resp = requests.get(
+            DUCKDUCKGO_BASE,
+            params={"q": term, "iax": "images", "ia": "images"},
+            headers=HEADERS,
+            timeout=20,
+        )
+        search_resp.raise_for_status()
+        match = re.search(r"vqd=['\"]?([\w-]+)['\"]?", search_resp.text)
+        if not match:
             return ""
-        page = next(iter(pages.values()))
-        ii = (page.get("imageinfo") or [{}])[0]
-        url = ii.get("thumburl") or ii.get("url")
+        vqd = match.group(1)
+
+        params = {
+            "l": "us-en",
+            "o": "json",
+            "q": term,
+            "vqd": vqd,
+            "f": ",,,",
+            "p": "1",
+        }
+        headers = {**HEADERS, "Referer": DUCKDUCKGO_BASE}
+        r = requests.get(
+            f"{DUCKDUCKGO_BASE}i.js",
+            params=params,
+            headers=headers,
+            timeout=20,
+        )
+        r.raise_for_status()
+        data = r.json()
+        results = data.get("results") or []
+        if not results:
+            return ""
+        url = results[0].get("image") or results[0].get("thumbnail")
         if not url:
             return ""
-        # Download
-        fn = safe_filename(f"{term}_img") + os.path.splitext(url)[1].split("?")[0]
+
+        suffix = os.path.splitext(url.split("?")[0])[1]
+        if not suffix:
+            suffix = ".jpg"
+        fn = safe_filename(f"{term}_img") + suffix
         dest = media_dir / fn
-        with requests.get(url, headers=HEADERS, timeout=30, stream=True) as img:
+        with requests.get(url, headers=headers, timeout=30, stream=True) as img:
             img.raise_for_status()
             with open(dest, "wb") as out:
                 for chunk in img.iter_content(chunk_size=65536):
@@ -412,7 +428,7 @@ def fetch_commons_image(term: str, media_dir: Path) -> str:
                         out.write(chunk)
         return fn
     except Exception as e:
-        console.log(f"[yellow]Commons image fetch failed for '{term}': {e}")
+        console.log(f"[yellow]DuckDuckGo image fetch failed for '{term}': {e}")
         return ""
 
 
@@ -513,7 +529,7 @@ def gather_for_term(term: str, media_dir: Path, debug: bool = False) -> CardData
 
     img = ""
     for candidate in search_terms:
-        img = fetch_commons_image(candidate, media_dir)
+        img = fetch_duckduckgo_image(candidate, media_dir)
         if img:
             break
     return CardData(term=term, reading=reading, english=english, sentence_jp=jp_ex, sentence_en=en_ex, definition_ja=defi, image_filename=img)
