@@ -8,7 +8,7 @@ Builds an Anki .apkg deck from a CSV (single column of Japanese terms).
 - Fetches:
   * Kana reading + EN glosses: Jisho API
   * Example sentence (JP) + EN translation: Tatoeba API
-  * JP monolingual definition: Japanese Wikipedia (fallback: Wiktionary → Goo 国語 dictionary)
+  * JP monolingual definition: Japanese Wikipedia (fallback: Wiktionary → Kotobank 国語辞典)
   * Related image: DuckDuckGo image search thumbnail
 
 Requires: pip install typer[all] rich requests genanki unidecode python-slugify
@@ -47,7 +47,7 @@ from slugify import slugify
 import genanki
 from unidecode import unidecode
 
-from goo_dictionary import extract_first_goo_definition
+from kotobank_dictionary import extract_first_kotobank_definition
 from wikipedia_utils import clean_wikipedia_extract
 from wiktionary_parser import extract_first_japanese_definition
 
@@ -62,8 +62,8 @@ HEADERS = {"User-Agent": USER_AGENT}
 
 JISHO_URL = "https://jisho.org/api/v1/search/words"
 TATOEBA_URL = "https://tatoeba.org/eng/api_v0/search"
-GOO_DICTIONARY_ENTRY_URL = "https://dictionary.goo.ne.jp/word/{term}/"
-GOO_DICTIONARY_SEARCH_URL = "https://dictionary.goo.ne.jp/srch/all/{term}/m0u/"
+KOTOBANK_ENTRY_URL = "https://kotobank.jp/word/{term}"
+KOTOBANK_SEARCH_URL = "https://kotobank.jp/s/{term}"
 WIKIPEDIA_JA_API = "https://ja.wikipedia.org/w/api.php"
 WIKTIONARY_JA_API = "https://ja.wiktionary.org/w/api.php"
 DUCKDUCKGO_BASE = "https://duckduckgo.com/"
@@ -312,22 +312,22 @@ def fetch_tatoeba_example(term: str, debug: bool = False) -> Tuple[str, str]:
         return "", ""
 
 
-def fetch_goo_ja_definition(term: str, debug: bool = False) -> str:
-    """Return a short JP definition from Goo's 国語 dictionary."""
+def fetch_kotobank_ja_definition(term: str, debug: bool = False) -> str:
+    """Return a short JP definition from Kotobank's 国語辞典."""
     _require_requests()
     encoded = quote(term, safe="")
-    for url_template in (GOO_DICTIONARY_ENTRY_URL, GOO_DICTIONARY_SEARCH_URL):
+    for url_template in (KOTOBANK_ENTRY_URL, KOTOBANK_SEARCH_URL):
         url = url_template.format(term=encoded)
         try:
             resp = requests.get(url, headers=HEADERS, timeout=15)
             resp.raise_for_status()
             if debug:
-                _debug_print("Goo", term, f"URL: {url}\n{resp.text}")
+                _debug_print("Kotobank", term, f"URL: {url}\n{resp.text}")
         except Exception as e:
-            console.log(f"[yellow]Goo dictionary fetch failed for '{term}' at {url}: {e}")
+            console.log(f"[yellow]Kotobank fetch failed for '{term}' at {url}: {e}")
             continue
 
-        definition = extract_first_goo_definition(resp.text)
+        definition = extract_first_kotobank_definition(resp.text)
         if definition:
             return definition[:400]
     return ""
@@ -553,10 +553,10 @@ def gather_for_term(term: str, media_dir: Path, debug: bool = False) -> CardData
                 f"[magenta]DEBUG Parsed Wiktionary definition for '{term}': definition={defi!r}"
             )
     if not defi:
-        defi = fetch_goo_ja_definition(term, debug=debug)
+        defi = fetch_kotobank_ja_definition(term, debug=debug)
         if debug:
             console.log(
-                f"[magenta]DEBUG Parsed Goo definition for '{term}': definition={defi!r}"
+                f"[magenta]DEBUG Parsed Kotobank definition for '{term}': definition={defi!r}"
             )
     search_terms: List[str] = [term]
     if reading and reading not in search_terms:

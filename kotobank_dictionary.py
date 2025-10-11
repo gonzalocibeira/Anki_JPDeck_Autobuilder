@@ -1,36 +1,48 @@
-"""Helpers to parse monolingual definitions from the Goo Japanese dictionary."""
+"""Helpers to parse monolingual definitions from the Kotobank Japanese dictionary."""
 from __future__ import annotations
 
 import json
 import re
 from html import unescape
-from typing import Iterator, Any
+from typing import Any, Iterator
 
 _JSON_LD_RE = re.compile(
-    r"<script[^>]+type=['\"]application/ld\+json['\"][^>]*>(.*?)</script>", re.IGNORECASE | re.DOTALL
+    r"<script[^>]+type=['\"]application/ld\+json['\"][^>]*>(.*?)</script>",
+    re.IGNORECASE | re.DOTALL,
 )
 
 _HTML_BLOCK_RE = re.compile(
-    r"<(?:div|p|li)[^>]*class=['\"][^'\"]*(?:meaning|text|description|content|explanation)[^'\"]*['\"][^>]*>(.*?)</(?:div|p|li)>",
+    r"<(?:section|div|p|dd|li)[^>]*(?:class|itemprop)=['\"][^'\">]*(?:meaning|description|content|text|kiji|entry|body|def|definition)['\"][^>]*>(.*?)</(?:section|div|p|dd|li)>",
     re.IGNORECASE | re.DOTALL,
 )
 
 _META_DESC_RE = re.compile(
-    r"<meta[^>]+name=['\"]description['\"][^>]+content=['\"](.*?)['\"]", re.IGNORECASE | re.DOTALL
+    r"<meta[^>]+name=['\"]description['\"][^>]+content=['\"](.*?)['\"]",
+    re.IGNORECASE | re.DOTALL,
 )
-
 
 _DICTIONARY_TYPES = {"DefinedTerm", "DictionaryEntry", "Article", "Sense"}
 
 _NOISE_SNIPPETS = (
     "サービス終了のお知らせ",
-    "教えて!goo",
-    "gooランキング",
+    "Kotobank（コトバンク）は",
+    "コトバンクは",
+    "kotobank.jp",
 )
 
 
-def extract_first_definition_from_json_ld(html: str) -> str:
-    """Return the first description entry from Goo's JSON-LD payload, if present."""
+def extract_first_kotobank_definition(html: str) -> str:
+    """Extract the first Japanese definition from Kotobank dictionary HTML."""
+    if not html:
+        return ""
+
+    via_json_ld = _extract_first_definition_from_json_ld(html)
+    if via_json_ld:
+        return via_json_ld
+    return _extract_first_definition_from_html_blocks(html)
+
+
+def _extract_first_definition_from_json_ld(html: str) -> str:
     for block in _JSON_LD_RE.findall(html or ""):
         block = block.strip()
         if not block:
@@ -48,9 +60,7 @@ def extract_first_definition_from_json_ld(html: str) -> str:
                 return cleaned
             if not fallback:
                 fallback = cleaned
-        if fallback:
-            if _is_noise_definition(fallback):
-                continue
+        if fallback and not _is_noise_definition(fallback):
             return fallback
     return ""
 
@@ -69,10 +79,7 @@ def _iter_json_descriptions(obj: Any) -> Iterator[tuple[str, int]]:
             yield from _iter_json_descriptions(item)
 
 
-def extract_first_definition_from_html_blocks(html: str) -> str:
-    """Fallback parser: scan definition blocks and strip HTML tags."""
-    if not html:
-        return ""
+def _extract_first_definition_from_html_blocks(html: str) -> str:
     cleaned_html = re.sub(r"<!--.*?-->", "", html, flags=re.DOTALL)
     for block in _HTML_BLOCK_RE.findall(cleaned_html):
         cleaned = _clean_html_fragment(block)
@@ -81,38 +88,25 @@ def extract_first_definition_from_html_blocks(html: str) -> str:
     meta = _META_DESC_RE.search(cleaned_html)
     if meta:
         cleaned_meta = _clean_text(meta.group(1))
-        if not _is_noise_definition(cleaned_meta):
+        if cleaned_meta and not _is_noise_definition(cleaned_meta):
             return cleaned_meta
     return ""
 
 
-def extract_first_goo_definition(html: str) -> str:
-    """Extract the first Japanese definition from Goo dictionary HTML."""
-    if not html:
-        return ""
-    via_json_ld = extract_first_definition_from_json_ld(html)
-    if via_json_ld:
-        return via_json_ld
-    return extract_first_definition_from_html_blocks(html)
-
-
 def _clean_html_fragment(fragment: str) -> str:
     fragment = re.sub(r"<br\s*/?>", "\n", fragment, flags=re.IGNORECASE)
+    fragment = re.sub(r"</?(?:rt|rp)>", "", fragment, flags=re.IGNORECASE)
     fragment = re.sub(r"<[^>]+>", "", fragment)
     return _clean_text(fragment)
 
 
 def _clean_text(text: str) -> str:
     text = unescape(text or "")
-    # Normalise whitespace but keep intentional newlines
     text = re.sub(r"\r\n?|\r", "\n", text)
     text = re.sub(r"[\t\x0b\f]+", " ", text)
-    # Collapse multiple blank lines and spaces
     lines = [line.strip() for line in text.split("\n")]
-    # Filter out empty lines but preserve sentence spacing
     filtered = [line for line in lines if line]
-    result = " ".join(filtered).strip()
-    return result
+    return " ".join(filtered).strip()
 
 
 def _is_noise_definition(text: str) -> bool:
@@ -124,4 +118,4 @@ def _is_noise_definition(text: str) -> bool:
     return False
 
 
-__all__ = ["extract_first_goo_definition"]
+__all__ = ["extract_first_kotobank_definition"]

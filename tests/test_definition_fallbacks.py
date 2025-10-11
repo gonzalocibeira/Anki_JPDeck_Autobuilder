@@ -198,7 +198,7 @@ def test_fetch_wiktionary_ja_definition_parses_extract(monkeypatch: pytest.Monke
 def test_gather_for_term_uses_wikipedia_definition_first(monkeypatch: pytest.MonkeyPatch, tmp_path):
     _patch_common_fetchers(monkeypatch)
 
-    calls = {"wikipedia": 0, "wiktionary": 0, "goo": 0}
+    calls = {"wikipedia": 0, "wiktionary": 0, "kotobank": 0}
 
     monkeypatch.setattr(
         adb,
@@ -212,20 +212,20 @@ def test_gather_for_term_uses_wikipedia_definition_first(monkeypatch: pytest.Mon
     )
     monkeypatch.setattr(
         adb,
-        "fetch_goo_ja_definition",
-        lambda term, debug=False: calls.__setitem__("goo", calls["goo"] + 1) or "Goo",
+        "fetch_kotobank_ja_definition",
+        lambda term, debug=False: calls.__setitem__("kotobank", calls["kotobank"] + 1) or "Kotobank",
     )
 
     card = adb.gather_for_term("語", tmp_path)
 
     assert card.definition_ja == "Wiki"
-    assert calls == {"wikipedia": 1, "wiktionary": 0, "goo": 0}
+    assert calls == {"wikipedia": 1, "wiktionary": 0, "kotobank": 0}
 
 
 def test_gather_for_term_falls_back_to_wiktionary(monkeypatch: pytest.MonkeyPatch, tmp_path):
     _patch_common_fetchers(monkeypatch)
 
-    calls = {"wikipedia": 0, "wiktionary": 0, "goo": 0}
+    calls = {"wikipedia": 0, "wiktionary": 0, "kotobank": 0}
 
     monkeypatch.setattr(
         adb,
@@ -239,20 +239,20 @@ def test_gather_for_term_falls_back_to_wiktionary(monkeypatch: pytest.MonkeyPatc
     )
     monkeypatch.setattr(
         adb,
-        "fetch_goo_ja_definition",
-        lambda term, debug=False: calls.__setitem__("goo", calls["goo"] + 1) or "Goo",
+        "fetch_kotobank_ja_definition",
+        lambda term, debug=False: calls.__setitem__("kotobank", calls["kotobank"] + 1) or "Kotobank",
     )
 
     card = adb.gather_for_term("語", tmp_path)
 
     assert card.definition_ja == "Wiktionary"
-    assert calls == {"wikipedia": 1, "wiktionary": 1, "goo": 0}
+    assert calls == {"wikipedia": 1, "wiktionary": 1, "kotobank": 0}
 
 
-def test_gather_for_term_falls_back_to_goo(monkeypatch: pytest.MonkeyPatch, tmp_path):
+def test_gather_for_term_falls_back_to_kotobank(monkeypatch: pytest.MonkeyPatch, tmp_path):
     _patch_common_fetchers(monkeypatch)
 
-    calls = {"wikipedia": 0, "wiktionary": 0, "goo": 0}
+    calls = {"wikipedia": 0, "wiktionary": 0, "kotobank": 0}
 
     monkeypatch.setattr(
         adb,
@@ -266,11 +266,11 @@ def test_gather_for_term_falls_back_to_goo(monkeypatch: pytest.MonkeyPatch, tmp_
     )
     monkeypatch.setattr(
         adb,
-        "fetch_goo_ja_definition",
-        lambda term, debug=False: calls.__setitem__("goo", calls["goo"] + 1) or "Goo",
+        "fetch_kotobank_ja_definition",
+        lambda term, debug=False: calls.__setitem__("kotobank", calls["kotobank"] + 1) or "Kotobank",
     )
 
     card = adb.gather_for_term("語", tmp_path)
 
-    assert card.definition_ja == "Goo"
-    assert calls == {"wikipedia": 1, "wiktionary": 1, "goo": 1}
+    assert card.definition_ja == "Kotobank"
+    assert calls == {"wikipedia": 1, "wiktionary": 1, "kotobank": 1}
