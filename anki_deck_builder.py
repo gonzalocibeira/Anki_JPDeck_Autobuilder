@@ -224,9 +224,64 @@ def fetch_jisho(term: str, debug: bool = False) -> Tuple[str, str]:
 def fetch_tatoeba_example(term: str, debug: bool = False) -> Tuple[str, str]:
     """Return (jp_sentence, en_translation) from Tatoeba.
     Handles API shapes where 'translations' may be a list of dicts or grouped lists.
+    Prefers results marked as "native" and chooses the longest available sentence.
     """
     _require_requests()
-    try:
+
+    def _collect_candidates(payload: Dict[str, Any], *, native: bool) -> List[Dict[str, Any]]:
+        candidates: List[Dict[str, Any]] = []
+        results = payload.get("results", [])
+        if not isinstance(results, list):
+            return candidates
+
+        for res in results:
+            if not isinstance(res, dict):
+                continue
+            jp_text = (res.get("text") or "").strip()
+            if not jp_text:
+                continue
+            translations = res.get("translations")
+            english_texts: List[str] = []
+
+            if isinstance(translations, list):
+                flat: List[Dict[str, Any]] = []
+                for item in translations:
+                    if isinstance(item, dict):
+                        flat.append(item)
+                    elif isinstance(item, list):
+                        flat.extend([sub for sub in item if isinstance(sub, dict)])
+                for trans in flat:
+                    if trans.get("lang") in ("eng", "en"):
+                        text = (trans.get("text") or "").strip()
+                        if text:
+                            english_texts.append(text)
+            elif isinstance(translations, dict):
+                for key in ("eng", "en"):
+                    items = translations.get(key)
+                    if not isinstance(items, list):
+                        continue
+                    for item in items:
+                        if isinstance(item, dict):
+                            text = (item.get("text") or "").strip()
+                            if text:
+                                english_texts.append(text)
+
+            if not english_texts:
+                continue
+
+            jp_length = len(re.sub(r"\s+", "", jp_text))
+            for en_text in english_texts:
+                candidates.append(
+                    {
+                        "jp": jp_text,
+                        "en": en_text,
+                        "length": jp_length,
+                        "native": native,
+                    }
+                )
+        return candidates
+
+    def _perform_request(extra_params: Dict[str, Any]) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
         params = {
             "from": "jpn",
             "query": term,
@@ -235,16 +290,16 @@ def fetch_tatoeba_example(term: str, debug: bool = False) -> Tuple[str, str]:
             "trans_link": "direct",
             "trans_to": "eng",
         }
-        r = requests.get(TATOEBA_URL, params=params, headers=HEADERS, timeout=20)
-        r.raise_for_status()
-        if debug:
-            console.log(
-                f"[cyan]DEBUG Tatoeba response for '{term}':[/] {r.text}"
-            )
-        j = r.json()
+        params.update(extra_params)
+        response = requests.get(TATOEBA_URL, params=params, headers=HEADERS, timeout=20)
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict):
+            payload = {}
+
         if debug:
             sample_result: Dict[str, Any] = {}
-            results = j.get("results", [])
+            results = payload.get("results", [])
             if isinstance(results, list) and results:
                 first = results[0]
                 if isinstance(first, dict):
@@ -277,36 +332,31 @@ def fetch_tatoeba_example(term: str, debug: bool = False) -> Tuple[str, str]:
                         "lang": first.get("lang"),
                         "translations_preview": translations_preview,
                     }
-            summary = {"total": len(results) if isinstance(results, list) else 0, "sample": sample_result}
+            summary = {
+                "params": extra_params,
+                "total": len(results) if isinstance(results, list) else 0,
+                "sample": sample_result,
+            }
             _debug_print("Tatoeba", term, summary)
-        results = j.get("results", [])
-        if not isinstance(results, list):
+
+        candidates = _collect_candidates(payload, native=bool(extra_params.get("native")))
+        return payload, candidates
+
+    try:
+        _, native_candidates = _perform_request({"native": "yes"})
+        all_candidates = list(native_candidates)
+
+        if not all_candidates:
+            _, fallback_candidates = _perform_request({})
+            all_candidates.extend(fallback_candidates)
+
+        if not all_candidates:
             return "", ""
-        for res in results:
-            if not isinstance(res, dict):
-                continue
-            jp_text = (res.get("text") or "").strip()
-            trans = res.get("translations", [])
-            # Case A: list of dicts with 'lang' and 'text'
-            if isinstance(trans, list):
-                # translations can be a flat list of dicts OR a list of lists
-                flat: List[dict] = []
-                for t in trans:
-                    if isinstance(t, dict):
-                        flat.append(t)
-                    elif isinstance(t, list):
-                        flat.extend([x for x in t if isinstance(x, dict)])
-                for t in flat:
-                    if t.get("lang") in ("eng", "en") and t.get("text"):
-                        return jp_text, t.get("text", "").strip()
-            # Case B: dict keyed by language codes
-            if isinstance(trans, dict):
-                eng_list = trans.get("eng") or trans.get("en")
-                if isinstance(eng_list, list) and eng_list:
-                    first = eng_list[0]
-                    if isinstance(first, dict) and first.get("text"):
-                        return jp_text, first.get("text", "").strip()
-        return "", ""
+
+        preferred = [c for c in all_candidates if c.get("native")]
+        search_pool = preferred if preferred else all_candidates
+        best = max(search_pool, key=lambda c: c.get("length", 0))
+        return best.get("jp", ""), best.get("en", "")
     except Exception as e:
         console.log(f"[yellow]Tatoeba fetch failed for '{term}': {e}")
         return "", ""
