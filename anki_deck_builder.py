@@ -8,7 +8,7 @@ Builds an Anki .apkg deck from a CSV (single column of Japanese terms).
 - Fetches:
   * Kana reading + EN glosses: Jisho API
   * Example sentence (JP) + EN translation: Tatoeba API
-  * JP monolingual definition: Japanese Wikipedia (fallback: Goo 国語 dictionary)
+  * JP monolingual definition: Japanese Wikipedia (fallback: Wiktionary → Goo 国語 dictionary)
   * Related image: DuckDuckGo image search thumbnail
 
 Requires: pip install typer[all] rich requests genanki unidecode python-slugify
@@ -49,6 +49,7 @@ from unidecode import unidecode
 
 from goo_dictionary import extract_first_goo_definition
 from wikipedia_utils import clean_wikipedia_extract
+from wiktionary_parser import extract_first_japanese_definition
 
 app = typer.Typer(add_completion=False)
 console = Console()
@@ -64,6 +65,7 @@ TATOEBA_URL = "https://tatoeba.org/eng/api_v0/search"
 GOO_DICTIONARY_ENTRY_URL = "https://dictionary.goo.ne.jp/word/{term}/"
 GOO_DICTIONARY_SEARCH_URL = "https://dictionary.goo.ne.jp/srch/all/{term}/m0u/"
 WIKIPEDIA_JA_API = "https://ja.wikipedia.org/w/api.php"
+WIKTIONARY_JA_API = "https://ja.wiktionary.org/w/api.php"
 DUCKDUCKGO_BASE = "https://duckduckgo.com/"
 
 DEFAULT_MODEL_NAME = "JP Word w/ Image + Examples (MVP)"
@@ -331,6 +333,44 @@ def fetch_goo_ja_definition(term: str, debug: bool = False) -> str:
     return ""
 
 
+def fetch_wiktionary_ja_definition(term: str, debug: bool = False) -> str:
+    """Return the first Japanese definition from Japanese Wiktionary."""
+    _require_requests()
+    try:
+        params = {
+            "action": "query",
+            "format": "json",
+            "prop": "extracts",
+            "explaintext": 1,
+            "titles": term,
+            "redirects": 1,
+        }
+        r = requests.get(WIKTIONARY_JA_API, params=params, headers=HEADERS, timeout=15)
+        r.raise_for_status()
+        j = r.json()
+        pages = (j.get("query", {}) or {}).get("pages", {})
+        if debug:
+            first_page: Dict[str, Any] = {}
+            if isinstance(pages, dict) and pages:
+                first_page = next(iter(pages.values())) or {}
+            summary = {
+                "pageid": first_page.get("pageid"),
+                "title": first_page.get("title"),
+                "extract_preview": (first_page.get("extract", "") or "")[:400],
+            }
+            _debug_print("Wiktionary JA", term, summary)
+        if not pages:
+            return ""
+        page = next(iter(pages.values())) or {}
+        extract = page.get("extract") or ""
+        if not extract:
+            return ""
+        return extract_first_japanese_definition(extract)
+    except Exception as e:
+        console.log(f"[yellow]Wiktionary JA fetch failed for '{term}': {e}")
+        return ""
+
+
 def fetch_wikipedia_ja_definition(term: str, debug: bool = False) -> str:
     """Return a short JP extract from Japanese Wikipedia (if any)."""
     _require_requests()
@@ -506,6 +546,12 @@ def gather_for_term(term: str, media_dir: Path, debug: bool = False) -> CardData
         console.log(
             f"[magenta]DEBUG Parsed Wikipedia definition for '{term}': definition={defi!r}"
         )
+    if not defi:
+        defi = fetch_wiktionary_ja_definition(term, debug=debug)
+        if debug:
+            console.log(
+                f"[magenta]DEBUG Parsed Wiktionary definition for '{term}': definition={defi!r}"
+            )
     if not defi:
         defi = fetch_goo_ja_definition(term, debug=debug)
         if debug:
