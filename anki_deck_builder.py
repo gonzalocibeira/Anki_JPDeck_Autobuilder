@@ -52,7 +52,7 @@ from wikipedia_utils import clean_wikipedia_extract
 from wiktionary_parser import extract_first_japanese_definition
 
 app = typer.Typer(add_completion=False)
-console = Console()
+console = Console(record=True)
 
 # -----------------------------
 # Config / Constants
@@ -691,6 +691,12 @@ def build(
     console.print(table)
 
     console.print("[green]Done![/] Import the .apkg into Anki. If you used the same config (deck/model IDs), new cards will append into the existing deck.")
+
+    if debug:
+        log_path = out_dir / "anki_deck_builder_debug_log.txt"
+        log_text = console.export_text(clear=False, styles=False)
+        log_path.write_text(log_text, encoding="utf-8")
+        console.print(f"[cyan]Debug log saved to[/] {log_path}")
 
 
 if __name__ == "__main__":
