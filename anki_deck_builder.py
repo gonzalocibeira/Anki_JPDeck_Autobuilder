@@ -483,7 +483,7 @@ def build_model(model_id: int, name: str = DEFAULT_MODEL_NAME) -> genanki.Model:
     .en { margin-top: 8px; font-size: 16px; }
     .def { margin-top: 8px; font-size: 16px; color: #333; }
     .ex { margin-top: 10px; }
-    img { max-width: 100%; height: auto; }
+    img { max-width: 50%; height: auto; }
     .front { text-align: center; }
     .back { text-align: left; }
     """
