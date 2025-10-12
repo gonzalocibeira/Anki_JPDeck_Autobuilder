@@ -32,6 +32,11 @@ try:
     import requests  # type: ignore
 except ModuleNotFoundError:  # pragma: no cover - handled gracefully for optional deps
     requests = None  # type: ignore
+
+try:
+    from gtts import gTTS  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover - handled gracefully for optional deps
+    gTTS = None  # type: ignore
 import typer
 from rich.console import Console
 from rich.progress import (
@@ -85,10 +90,12 @@ class CardData:
     sentence_en: str = ""
     definition_ja: str = ""
     image_filename: str = ""  # local filename (downloaded)
+    audio_filename: str = ""  # local filename (generated)
 
     def to_fields(self) -> List[str]:
         # Order must match the model fields list below
         img_tag = f'<img src="{self.image_filename}" />' if self.image_filename else ''
+        audio_tag = f"[sound:{self.audio_filename}]" if self.audio_filename else ""
         return [
             self.term,
             self.reading,
@@ -96,6 +103,7 @@ class CardData:
             self.sentence_jp,
             self.sentence_en,
             self.definition_ja,
+            audio_tag,
             f"<div>{img_tag}</div>",
         ]
 
@@ -170,6 +178,57 @@ def _require_requests() -> None:
         raise RuntimeError(
             "The 'requests' package is required for network operations. Install it via 'pip install requests'."
         )
+
+
+def _require_gtts() -> None:
+    if gTTS is None:  # pragma: no cover - triggered only when dependency missing
+        raise RuntimeError(
+            "The 'gTTS' package is required for audio synthesis. Install it via 'pip install gTTS'."
+        )
+
+
+_gtts_missing_warned = False
+
+
+def generate_term_audio(term: str, reading: str, media_dir: Path) -> str:
+    global _gtts_missing_warned
+    candidates = []
+    if term and term.strip():
+        candidates.append(term.strip())
+    if reading and reading.strip() and reading.strip() not in candidates:
+        candidates.append(reading.strip())
+
+    if not candidates:
+        return ""
+
+    try:
+        _require_gtts()
+    except RuntimeError as exc:
+        if not _gtts_missing_warned:
+            message = str(exc)
+            if hasattr(console, "print"):
+                console.print(f"[red]{message}")
+            else:  # pragma: no cover - exercised in tests with dummy console
+                console.log(message)
+            _gtts_missing_warned = True
+        return ""
+
+    filename_seed = candidates[0]
+    filename = safe_filename(f"{filename_seed}_audio") + ".mp3"
+    dest = media_dir / filename
+
+    for idx, text in enumerate(candidates):
+        try:
+            tts = gTTS(text=text, lang="ja")  # type: ignore[misc]
+            tts.save(str(dest))
+            return filename
+        except Exception as e:  # pragma: no cover - network or library specific failures
+            if dest.exists():
+                dest.unlink()
+            console.log(f"[yellow]gTTS synthesis failed for '{text}': {e}")
+            if idx == len(candidates) - 1:
+                return ""
+    return ""
 
 
 def fetch_jisho(term: str, debug: bool = False) -> Tuple[str, str]:
@@ -533,6 +592,7 @@ def build_model(model_id: int, name: str = DEFAULT_MODEL_NAME) -> genanki.Model:
     .en { margin-top: 8px; font-size: 16px; }
     .def { margin-top: 8px; font-size: 16px; color: #333; }
     .ex { margin-top: 10px; }
+    .audio { margin-top: 10px; }
     img { max-width: 50%; height: auto; }
     .front { text-align: center; }
     .back { text-align: left; }
@@ -544,6 +604,7 @@ def build_model(model_id: int, name: str = DEFAULT_MODEL_NAME) -> genanki.Model:
         {"name": "SentenceJP"},
         {"name": "SentenceEN"},
         {"name": "DefinitionJP"},
+        {"name": "Audio"},
         {"name": "Image"},
     ]
     templates = [
@@ -564,6 +625,7 @@ def build_model(model_id: int, name: str = DEFAULT_MODEL_NAME) -> genanki.Model:
   <div class='ex'><b>例文:</b> {{SentenceJP}}</div>
   <div class='ex'><b>E.g.:</b> {{SentenceEN}}</div>
   <div class='ex'><b>JP Dict:</b> {{DefinitionJP}}</div>
+  {{#Audio}}<div class='audio'>{{Audio}}</div>{{/Audio}}
 </div>
 """,
         }
@@ -628,7 +690,19 @@ def gather_for_term(term: str, media_dir: Path, debug: bool = False) -> CardData
         img = fetch_duckduckgo_image(candidate, media_dir)
         if img:
             break
-    return CardData(term=term, reading=reading, english=english, sentence_jp=jp_ex, sentence_en=en_ex, definition_ja=defi, image_filename=img)
+
+    audio = generate_term_audio(term, reading, media_dir)
+
+    return CardData(
+        term=term,
+        reading=reading,
+        english=english,
+        sentence_jp=jp_ex,
+        sentence_en=en_ex,
+        definition_ja=defi,
+        image_filename=img,
+        audio_filename=audio,
+    )
 
 
 def save_config(config_path: Path, deck_id: int, model_id: int, deck_name: str):
@@ -710,6 +784,8 @@ def build(
             card_data_list.append(cd)
             if cd.image_filename:
                 media_files.append(str(media_dir / cd.image_filename))
+            if cd.audio_filename:
+                media_files.append(str(media_dir / cd.audio_filename))
             progress.advance(task)
 
     # Add notes
