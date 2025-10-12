@@ -85,17 +85,22 @@ class CardData:
     sentence_en: str = ""
     definition_ja: str = ""
     image_filename: str = ""  # local filename (downloaded)
+    audio_filename: str = ""
+    inflections: str = ""
 
     def to_fields(self) -> List[str]:
         # Order must match the model fields list below
         img_tag = f'<img src="{self.image_filename}" />' if self.image_filename else ''
+        audio_field = f"[sound:{self.audio_filename}]" if self.audio_filename else ""
         return [
             self.term,
             self.reading,
             self.english,
+            audio_field,
             self.sentence_jp,
             self.sentence_en,
             self.definition_ja,
+            self.inflections,
             f"<div>{img_tag}</div>",
         ]
 
@@ -172,8 +177,8 @@ def _require_requests() -> None:
         )
 
 
-def fetch_jisho(term: str, debug: bool = False) -> Tuple[str, str]:
-    """Return (reading_kana, english_glosses) from Jisho for a term."""
+def fetch_jisho(term: str, debug: bool = False) -> Dict[str, Any]:
+    """Return data from Jisho including reading, glosses, alternates, and audio."""
     _require_requests()
     try:
         resp = requests.get(JISHO_URL, params={"keyword": term}, headers=HEADERS, timeout=15)
@@ -199,10 +204,34 @@ def fetch_jisho(term: str, debug: bool = False) -> Tuple[str, str]:
                     "tags": first_sense.get("tags", []),
                 }
             _debug_print("Jisho", term, summary)
+        result: Dict[str, Any] = {
+            "reading": "",
+            "glosses": "",
+            "alternate_forms": [],
+            "audio_url": None,
+        }
         if not data.get("data"):
-            return "", ""
+            return result
         first = data["data"][0]
-        reading = (first.get("japanese", [{}])[0] or {}).get("reading", "")
+        japanese = first.get("japanese", []) if isinstance(first, dict) else []
+        primary: Dict[str, Any] = {}
+        alternates: List[Dict[str, Any]] = []
+        if isinstance(japanese, list) and japanese:
+            if isinstance(japanese[0], dict):
+                primary = japanese[0]
+            for entry in japanese[1:]:
+                if isinstance(entry, dict):
+                    alt = {
+                        "word": entry.get("word", ""),
+                        "reading": entry.get("reading", ""),
+                    }
+                    if alt["word"] or alt["reading"]:
+                        alternates.append(alt)
+        reading = primary.get("reading") if isinstance(primary, dict) else ""
+        if not reading:
+            reading = primary.get("word", "") if isinstance(primary, dict) else ""
+        result["reading"] = reading or ""
+        result["alternate_forms"] = alternates
         # Combine first sense's english_definitions (fallback to joining all senses)
         senses = first.get("senses", [])
         if senses:
@@ -215,10 +244,24 @@ def fetch_jisho(term: str, debug: bool = False) -> Tuple[str, str]:
                 )
         else:
             english = ""
-        return reading or "", english or ""
+        result["glosses"] = english or ""
+        sounds = first.get("sounds", []) if isinstance(first, dict) else []
+        if isinstance(sounds, list):
+            for sound in sounds:
+                if not isinstance(sound, dict):
+                    continue
+                audio_url = (
+                    sound.get("mp3")
+                    or sound.get("ogg")
+                    or sound.get("audio")
+                )
+                if audio_url:
+                    result["audio_url"] = str(audio_url)
+                    break
+        return result
     except Exception as e:
         console.log(f"[yellow]Jisho fetch failed for '{term}': {e}")
-        return "", ""
+        return {"reading": "", "glosses": "", "alternate_forms": [], "audio_url": None}
 
 
 def fetch_tatoeba_example(term: str, debug: bool = False) -> Tuple[str, str]:
@@ -533,6 +576,8 @@ def build_model(model_id: int, name: str = DEFAULT_MODEL_NAME) -> genanki.Model:
     .en { margin-top: 8px; font-size: 16px; }
     .def { margin-top: 8px; font-size: 16px; color: #333; }
     .ex { margin-top: 10px; }
+    .audio { margin-top: 6px; }
+    .inflections { margin-top: 8px; font-size: 15px; }
     img { max-width: 50%; height: auto; }
     .front { text-align: center; }
     .back { text-align: left; }
@@ -541,9 +586,11 @@ def build_model(model_id: int, name: str = DEFAULT_MODEL_NAME) -> genanki.Model:
         {"name": "Expression"},
         {"name": "Reading"},
         {"name": "English"},
+        {"name": "Audio"},
         {"name": "SentenceJP"},
         {"name": "SentenceEN"},
         {"name": "DefinitionJP"},
+        {"name": "Inflections"},
         {"name": "Image"},
     ]
     templates = [
@@ -560,10 +607,12 @@ def build_model(model_id: int, name: str = DEFAULT_MODEL_NAME) -> genanki.Model:
 {{FrontSide}}
 <hr id='answer'>
 <div class='back'>
-  <div class='en'><b>Meaning:</b> {{English}}</div>
-  <div class='ex'><b>例文:</b> {{SentenceJP}}</div>
-  <div class='ex'><b>E.g.:</b> {{SentenceEN}}</div>
-  <div class='ex'><b>JP Dict:</b> {{DefinitionJP}}</div>
+  {{#English}}<div class='en'><b>Meaning:</b> {{English}}</div>{{/English}}
+  {{#Audio}}<div class='audio'>{{Audio}}</div>{{/Audio}}
+  {{#SentenceJP}}<div class='ex'><b>例文:</b> {{SentenceJP}}</div>{{/SentenceJP}}
+  {{#SentenceEN}}<div class='ex'><b>E.g.:</b> {{SentenceEN}}</div>{{/SentenceEN}}
+  {{#DefinitionJP}}<div class='ex'><b>JP Dict:</b> {{DefinitionJP}}</div>{{/DefinitionJP}}
+  {{#Inflections}}<div class='inflections'><b>Inflections:</b> {{Inflections}}</div>{{/Inflections}}
 </div>
 """,
         }
@@ -581,11 +630,33 @@ def make_note(model: genanki.Model, cd: CardData) -> genanki.Note:
 # -----------------------------
 
 def gather_for_term(term: str, media_dir: Path, debug: bool = False) -> CardData:
-    reading, english = fetch_jisho(term, debug=debug)
+    jisho_data = fetch_jisho(term, debug=debug)
+    reading = jisho_data.get("reading", "")
+    english = jisho_data.get("glosses", "")
+    alternate_forms = jisho_data.get("alternate_forms", []) or []
+    audio_url = jisho_data.get("audio_url")
     if debug:
         console.log(
-            f"[magenta]DEBUG Parsed Jisho for '{term}': reading={reading!r}, english={english!r}"
+            f"[magenta]DEBUG Parsed Jisho for '{term}': reading={reading!r}, english={english!r}, alternates={alternate_forms!r}, audio_url={audio_url!r}"
         )
+    audio_filename = ""
+    if audio_url:
+        try:
+            _require_requests()
+            suffix = os.path.splitext(str(audio_url).split("?")[0])[1]
+            if suffix.lower() not in {".mp3", ".ogg"}:
+                suffix = ".mp3"
+            audio_filename = f"{safe_filename(f'{term}_audio')}" + suffix
+            dest = media_dir / audio_filename
+            with requests.get(str(audio_url), headers=HEADERS, timeout=30, stream=True) as audio_resp:
+                audio_resp.raise_for_status()
+                with open(dest, "wb") as out:
+                    for chunk in audio_resp.iter_content(chunk_size=65536):
+                        if chunk:
+                            out.write(chunk)
+        except Exception as e:
+            console.log(f"[yellow]Audio fetch failed for '{term}': {e}")
+            audio_filename = ""
     jp_ex, en_ex = fetch_tatoeba_example(term, debug=debug)
     if debug:
         console.log(
@@ -623,12 +694,40 @@ def gather_for_term(term: str, media_dir: Path, debug: bool = False) -> CardData
             if len(search_terms) >= 5:
                 break
 
+    formatted_inflections: List[str] = []
+    for entry in alternate_forms:
+        if not isinstance(entry, dict):
+            continue
+        word = str(entry.get("word", "") or "").strip()
+        alt_reading = str(entry.get("reading", "") or "").strip()
+        display = ""
+        if word and alt_reading and word != alt_reading:
+            display = f"{word}（{alt_reading}）"
+        else:
+            display = word or alt_reading
+        if display and display not in formatted_inflections:
+            formatted_inflections.append(display)
+    inflections_html = ""
+    if formatted_inflections:
+        items = "".join(f"<li>{entry}</li>" for entry in formatted_inflections)
+        inflections_html = f"<ul>{items}</ul>"
+
     img = ""
     for candidate in search_terms:
         img = fetch_duckduckgo_image(candidate, media_dir)
         if img:
             break
-    return CardData(term=term, reading=reading, english=english, sentence_jp=jp_ex, sentence_en=en_ex, definition_ja=defi, image_filename=img)
+    return CardData(
+        term=term,
+        reading=reading,
+        english=english,
+        sentence_jp=jp_ex,
+        sentence_en=en_ex,
+        definition_ja=defi,
+        image_filename=img,
+        audio_filename=audio_filename,
+        inflections=inflections_html,
+    )
 
 
 def save_config(config_path: Path, deck_id: int, model_id: int, deck_name: str):
@@ -710,6 +809,8 @@ def build(
             card_data_list.append(cd)
             if cd.image_filename:
                 media_files.append(str(media_dir / cd.image_filename))
+            if cd.audio_filename:
+                media_files.append(str(media_dir / cd.audio_filename))
             progress.advance(task)
 
     # Add notes

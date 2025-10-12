@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import sys
 import types
@@ -164,8 +164,34 @@ class DummyResponse:
         return None
 
 
+class DummyStreamResponse:
+    def __init__(self, content: bytes):
+        self._content = content
+
+    def __enter__(self):  # pragma: no cover - context manager glue
+        return self
+
+    def __exit__(self, exc_type, exc, tb):  # pragma: no cover - context manager glue
+        return False
+
+    def raise_for_status(self) -> None:  # pragma: no cover - no-op in tests
+        return None
+
+    def iter_content(self, chunk_size: int = 65536):  # pragma: no cover - deterministic chunk
+        yield self._content
+
+
 def _patch_common_fetchers(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(adb, "fetch_jisho", lambda term, debug=False: ("よみ", "english"))
+    monkeypatch.setattr(
+        adb,
+        "fetch_jisho",
+        lambda term, debug=False: {
+            "reading": "よみ",
+            "glosses": "english",
+            "alternate_forms": [],
+            "audio_url": None,
+        },
+    )
     monkeypatch.setattr(adb, "fetch_tatoeba_example", lambda term, debug=False: ("例文", "Example"))
     monkeypatch.setattr(adb, "fetch_duckduckgo_image", lambda term, media_dir: "")
 
@@ -274,3 +300,49 @@ def test_gather_for_term_falls_back_to_kotobank(monkeypatch: pytest.MonkeyPatch,
 
     assert card.definition_ja == "Kotobank"
     assert calls == {"wikipedia": 1, "wiktionary": 1, "kotobank": 1}
+
+
+def test_gather_for_term_downloads_audio_and_formats_inflections(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    _patch_common_fetchers(monkeypatch)
+
+    alternates: List[Dict[str, str]] = [
+        {"word": "語った", "reading": "かたった"},
+        {"reading": "かたる"},
+    ]
+
+    monkeypatch.setattr(
+        adb,
+        "fetch_jisho",
+        lambda term, debug=False: {
+            "reading": "よみ",
+            "glosses": "english",
+            "alternate_forms": alternates,
+            "audio_url": "https://audio.example/test.mp3",
+        },
+    )
+    monkeypatch.setattr(adb, "fetch_wikipedia_ja_definition", lambda term, debug=False: "")
+    monkeypatch.setattr(adb, "fetch_wiktionary_ja_definition", lambda term, debug=False: "")
+    monkeypatch.setattr(adb, "fetch_kotobank_ja_definition", lambda term, debug=False: "")
+
+    requested_urls: List[str] = []
+
+    def fake_get(url, *args, **kwargs):
+        requested_urls.append(url)
+        return DummyStreamResponse(b"audio-bytes")
+
+    monkeypatch.setattr(adb.requests, "get", fake_get)
+
+    card = adb.gather_for_term("語", tmp_path)
+
+    expected_audio = f"{adb.safe_filename('語_audio')}.mp3"
+    assert card.audio_filename == expected_audio
+    assert (tmp_path / expected_audio).exists()
+    assert requested_urls == ["https://audio.example/test.mp3"]
+
+    assert card.inflections == "<ul><li>語った（かたった）</li><li>かたる</li></ul>"
+
+    fields = card.to_fields()
+    assert fields[3] == f"[sound:{expected_audio}]"
+    assert fields[7] == card.inflections
