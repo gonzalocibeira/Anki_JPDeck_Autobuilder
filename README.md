@@ -6,6 +6,7 @@ Anki JP Deck Autobuilder is a command-line utility that assembles a multimedia A
 
 - **CSV ingestion** – Reads a single-column CSV (any common delimiter) containing Japanese terms.
 - **Automated enrichment** – Queries several public APIs (Jisho, Tatoeba, Japanese Wikipedia, Kotobank dictionary, and DuckDuckGo image search) to supplement each term with kana readings, English glosses, example sentences, monolingual definitions, and related imagery.
+- **Audio synthesis** – Generates optional Japanese text-to-speech clips for each term using gTTS and bundles them with the deck.
 - **Deck append support** – Reuses stored deck/model IDs so newly generated cards merge with an existing deck when imported into Anki.
 - **Progress feedback** – Displays a Rich-powered progress bar and build summary in the terminal.
 - **Media packaging** – Downloads image assets and bundles them alongside the deck for a ready-to-import `.apkg`.
@@ -21,13 +22,14 @@ Anki JP Deck Autobuilder is a command-line utility that assembles a multimedia A
   - [`genanki`](https://github.com/kerrickstaley/genanki)
   - [`unidecode`](https://github.com/avian2/unidecode)
   - [`python-slugify`](https://github.com/un33k/python-slugify)
+  - [`gTTS`](https://github.com/pndurette/gTTS)
 
 ### Installing dependencies
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\\Scripts\\activate
-pip install typer[all] rich requests genanki unidecode python-slugify
+pip install typer[all] rich requests genanki unidecode python-slugify gTTS
 ```
 
 ## Input expectations
@@ -45,7 +47,7 @@ The script expects a CSV file where each row contains a Japanese term in the fir
 Running the tool produces the following artifacts inside the chosen output directory (default: `./out`):
 
 - `Japanese_Auto_Deck.apkg` – The packaged Anki deck file.
-- `media/` – A folder containing any images downloaded for the cards.
+- `media/` – A folder containing any images and synthesized audio clips generated for the cards.
 - `anki_deck_builder.config.json` – Stores deck/model identifiers so future runs can append to the same Anki deck.
 
 ## How it works (pipeline)
@@ -56,6 +58,7 @@ Running the tool produces the following artifacts inside the chosen output direc
    - `fetch_tatoeba_example` retrieves a Japanese example sentence and its English translation from Tatoeba.
 - `fetch_wikipedia_ja_definition` retrieves the introductory extract from Japanese Wikipedia and trims filler text for a concise definition. If Wikipedia lacks a result, `fetch_kotobank_ja_definition` falls back to the Kotobank 国語辞典 for a short definition.
    - `fetch_duckduckgo_image` searches DuckDuckGo's image index for a representative image, downloading the first suitable thumbnail. The lookup adapts by trying the original term, its reading, and the leading English glosses until an image is found.
+   - `generate_term_audio` synthesizes Japanese text-to-speech (if gTTS is installed) so the resulting notes can play back pronunciation audio inside Anki.
 3. **Assemble card data** – The collected fields are wrapped in a `CardData` dataclass, which formats the Anki note fields (including an `<img>` tag when an image is available).
 4. **Configure deck** – If `--new-deck` is enabled (default), fresh deck/model IDs are generated and persisted to `anki_deck_builder.config.json`. Otherwise, existing IDs are loaded so new notes merge with an existing deck on import.
 5. **Build notes** – The script iterates over the enriched cards, creating `genanki.Note` instances using a predefined model that renders the front/back layout.
@@ -107,6 +110,7 @@ The config file is a simple JSON document that stores identifiers used by Anki t
 ## Error handling & logging
 
 - API failures are logged to the console in yellow and gracefully skipped, so the build continues with whatever data was retrieved.
+- If the optional gTTS dependency is missing, the script prints a clear installation hint and continues building the deck without audio.
 - If no terms are found in the CSV, the script exits without creating an output deck.
 - Missing CSV files trigger an error message and exit code 1.
 
