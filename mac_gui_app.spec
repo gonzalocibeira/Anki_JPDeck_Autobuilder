@@ -1,13 +1,17 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from PyInstaller.utils.hooks import collect_tk_files
+
 block_cipher = None
+
+tk_datas = collect_tk_files()
 
 
 a = Analysis(
     ['mac_gui_app.py'],
     pathex=['.'],
     binaries=[],
-    datas=[],
+    datas=tk_datas,
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
