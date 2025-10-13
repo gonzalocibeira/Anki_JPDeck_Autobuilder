@@ -13,7 +13,7 @@ Anki JP Deck Autobuilder is a command-line utility that assembles a multimedia A
 
 ## Requirements
 
-- Python 3.8 or newer.
+- Python 3.8 or newer (Python 3.10+ recommended for packaging on macOS).
 - Internet access (the script performs live API calls for each term).
 - The following Python packages:
   - [`typer[all]`](https://typer.tiangolo.com/)
@@ -23,13 +23,14 @@ Anki JP Deck Autobuilder is a command-line utility that assembles a multimedia A
   - [`unidecode`](https://github.com/avian2/unidecode)
   - [`python-slugify`](https://github.com/un33k/python-slugify)
   - [`gTTS`](https://github.com/pndurette/gTTS)
+  - [`PyInstaller`](https://pyinstaller.org/) (for building the macOS app bundle)
 
 ### Installing dependencies
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\\Scripts\\activate
-pip install typer[all] rich requests genanki unidecode python-slugify gTTS
+pip install typer[all] rich requests genanki unidecode python-slugify gTTS PyInstaller
 ```
 
 ## Input expectations
@@ -131,3 +132,39 @@ python anki_deck_builder.py --help
 (Ensure the required dependencies are installed beforehand.)
 
 Contributions and improvements are welcome! Feel free to fork the repository and submit pull requests.
+
+## macOS app packaging
+
+The repository includes a simple Tkinter GUI (`mac_gui_app.py`) and a PyInstaller spec file that can bundle the tool into a `.app`
+for macOS. To create the app:
+
+1. Ensure you are on macOS with Xcode command line tools installed (`xcode-select --install`).
+2. Create and activate a virtual environment:
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate
+   ```
+3. Install the project dependencies (including PyInstaller):
+   ```bash
+   pip install typer[all] rich requests genanki unidecode python-slugify gTTS PyInstaller
+   ```
+4. Build the bundle:
+   ```bash
+   make macos-app
+   ```
+
+PyInstaller will place `AnkiJPDeckBuilder.app` under `dist/`. You can double-click the app to launch the GUI without opening a
+terminal window.
+
+### Troubleshooting on macOS
+
+- **Gatekeeper warnings:** Because the bundle is unsigned and not notarized, macOS may block the first launch. Right-click the
+  app, choose **Open**, and confirm the prompt. Alternatively remove the quarantine attribute manually:
+  ```bash
+  xattr -d com.apple.quarantine dist/AnkiJPDeckBuilder.app
+  ```
+- **Codesigning / notarization:** To distribute the app broadly you should sign it with your Apple Developer ID and submit it for
+  notarization. PyInstaller's [codesigning docs](https://pyinstaller.org/en/stable/usage.html#macos-codesigning) cover the
+  required steps.
+- **Missing dependencies:** If the app immediately quits, ensure the virtual environment used for packaging includes all runtime
+  dependencies listed above. Rebuild after reinstalling packages or clearing the `build/` and `dist/` directories with `make clean`.
