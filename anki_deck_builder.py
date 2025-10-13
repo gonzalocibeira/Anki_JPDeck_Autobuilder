@@ -654,20 +654,27 @@ def build_model(model_id: int, name: str = DEFAULT_MODEL_NAME) -> genanki.Model:
 <div class='front'>
   <div class='jp'>{{Expression}}</div>
   <div class='reading'>{{Reading}}</div>
+  {{#Audio}}<div class='audio'>{{Audio}}</div>{{/Audio}}
   <div class='img'>{{Image}}</div>
+  <div class='ex'><b>例文:</b> {{SentenceJP}}</div>
+  {{#SentenceAudio}}<div class='audio'>{{SentenceAudio}}</div>{{/SentenceAudio}}
 </div>
 """,
             "afmt": """\
-{{FrontSide}}
+<div class='front'>
+  <div class='jp'>{{Expression}}</div>
+  <div class='reading'>{{Reading}}</div>
+  {{#Audio}}<div class='audio'>{{Audio}}</div>{{/Audio}}
+  <div class='img'>{{Image}}</div>
+</div>
 <hr id='answer'>
   <div class='back'>
     <div class='en'><b>Meaning:</b> {{English}}</div>
     <div class='ex'><b>例文:</b> {{SentenceJP}}</div>
-    {{#SentenceAudio}}<div class='audio'>{{SentenceAudio}}</div>{{/SentenceAudio}}
     <div class='ex'><b>E.g.:</b> {{SentenceEN}}</div>
+    {{#SentenceAudio}}<div class='audio'>{{SentenceAudio}}</div>{{/SentenceAudio}}
     <div class='ex'><b>JP Dict:</b> {{DefinitionJP}}</div>
-    {{#Audio}}<div class='audio'>{{Audio}}</div>{{/Audio}}
-  </div>
+</div>
 """,
         }
     ]
