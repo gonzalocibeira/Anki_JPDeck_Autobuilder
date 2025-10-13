@@ -91,17 +91,22 @@ class CardData:
     definition_ja: str = ""
     image_filename: str = ""  # local filename (downloaded)
     audio_filename: str = ""  # local filename (generated)
+    sentence_audio_filename: str = ""  # local filename (generated)
 
     def to_fields(self) -> List[str]:
         # Order must match the model fields list below
         img_tag = f'<img src="{self.image_filename}" />' if self.image_filename else ''
         audio_tag = f"[sound:{self.audio_filename}]" if self.audio_filename else ""
+        sentence_audio_tag = (
+            f"[sound:{self.sentence_audio_filename}]" if self.sentence_audio_filename else ""
+        )
         return [
             self.term,
             self.reading,
             self.english,
             self.sentence_jp,
             self.sentence_en,
+            sentence_audio_tag,
             self.definition_ja,
             audio_tag,
             f"<div>{img_tag}</div>",
@@ -229,6 +234,40 @@ def generate_term_audio(term: str, reading: str, media_dir: Path) -> str:
             if idx == len(candidates) - 1:
                 return ""
     return ""
+
+
+def generate_sentence_audio(sentence: str, media_dir: Path) -> str:
+    global _gtts_missing_warned
+    if not sentence or not sentence.strip():
+        return ""
+
+    try:
+        _require_gtts()
+    except RuntimeError as exc:
+        if not _gtts_missing_warned:
+            message = str(exc)
+            if hasattr(console, "print"):
+                console.print(f"[red]{message}")
+            else:  # pragma: no cover - exercised in tests with dummy console
+                console.log(message)
+            _gtts_missing_warned = True
+        return ""
+
+    text = sentence.strip()
+    base = text[:30]
+    hash_suffix = hashlib.md5(text.encode("utf-8")).hexdigest()[:8]
+    filename = safe_filename(f"{base}_{hash_suffix}_sentence_audio") + ".mp3"
+    dest = media_dir / filename
+
+    try:
+        tts = gTTS(text=text, lang="ja")  # type: ignore[misc]
+        tts.save(str(dest))
+        return filename
+    except Exception as e:  # pragma: no cover - network or library specific failures
+        if dest.exists():
+            dest.unlink()
+        console.log(f"[yellow]gTTS synthesis failed for sentence '{text}': {e}")
+        return ""
 
 
 def fetch_jisho(term: str, debug: bool = False) -> Tuple[str, str]:
@@ -603,6 +642,7 @@ def build_model(model_id: int, name: str = DEFAULT_MODEL_NAME) -> genanki.Model:
         {"name": "English"},
         {"name": "SentenceJP"},
         {"name": "SentenceEN"},
+        {"name": "SentenceAudio"},
         {"name": "DefinitionJP"},
         {"name": "Audio"},
         {"name": "Image"},
@@ -620,13 +660,14 @@ def build_model(model_id: int, name: str = DEFAULT_MODEL_NAME) -> genanki.Model:
             "afmt": """\
 {{FrontSide}}
 <hr id='answer'>
-<div class='back'>
-  <div class='en'><b>Meaning:</b> {{English}}</div>
-  <div class='ex'><b>例文:</b> {{SentenceJP}}</div>
-  <div class='ex'><b>E.g.:</b> {{SentenceEN}}</div>
-  <div class='ex'><b>JP Dict:</b> {{DefinitionJP}}</div>
-  {{#Audio}}<div class='audio'>{{Audio}}</div>{{/Audio}}
-</div>
+  <div class='back'>
+    <div class='en'><b>Meaning:</b> {{English}}</div>
+    <div class='ex'><b>例文:</b> {{SentenceJP}}</div>
+    {{#SentenceAudio}}<div class='audio'>{{SentenceAudio}}</div>{{/SentenceAudio}}
+    <div class='ex'><b>E.g.:</b> {{SentenceEN}}</div>
+    <div class='ex'><b>JP Dict:</b> {{DefinitionJP}}</div>
+    {{#Audio}}<div class='audio'>{{Audio}}</div>{{/Audio}}
+  </div>
 """,
         }
     ]
@@ -692,6 +733,7 @@ def gather_for_term(term: str, media_dir: Path, debug: bool = False) -> CardData
             break
 
     audio = generate_term_audio(term, reading, media_dir)
+    sentence_audio = generate_sentence_audio(jp_ex, media_dir)
 
     return CardData(
         term=term,
@@ -702,6 +744,7 @@ def gather_for_term(term: str, media_dir: Path, debug: bool = False) -> CardData
         definition_ja=defi,
         image_filename=img,
         audio_filename=audio,
+        sentence_audio_filename=sentence_audio,
     )
 
 
@@ -786,6 +829,8 @@ def build(
                 media_files.append(str(media_dir / cd.image_filename))
             if cd.audio_filename:
                 media_files.append(str(media_dir / cd.audio_filename))
+            if cd.sentence_audio_filename:
+                media_files.append(str(media_dir / cd.sentence_audio_filename))
             progress.advance(task)
 
     # Add notes
