@@ -454,6 +454,10 @@ def fetch_tatoeba_example(term: str, debug: bool = False) -> Tuple[str, str]:
         preferred = [c for c in all_candidates if c.get("native")]
         search_pool = preferred if preferred else all_candidates
         best = max(search_pool, key=lambda c: c.get("length", 0))
+        if best.get("length", 0) > 20:
+            short_candidates = [c for c in search_pool if c.get("length", 0) <= 20]
+            if short_candidates:
+                best = max(short_candidates, key=lambda c: c.get("length", 0))
         return best.get("jp", ""), best.get("en", "")
     except Exception as e:
         console.log(f"[yellow]Tatoeba fetch failed for '{term}': {e}")
