@@ -133,28 +133,97 @@ python anki_deck_builder.py --help
 
 Contributions and improvements are welcome! Feel free to fork the repository and submit pull requests.
 
-## macOS app packaging
+## macOS app packaging (step-by-step)
 
-The repository includes a simple Tkinter GUI (`mac_gui_app.py`) and a PyInstaller spec file that can bundle the tool into a `.app`
-for macOS. To create the app:
+The repository ships with a Tkinter GUI (`mac_gui_app.py`) and a PyInstaller spec file that builds a native-looking `.app`
+bundle. Follow the checklist below from start to finish—no prior packaging experience is required.
 
-1. Ensure you are on macOS with Xcode command line tools installed (`xcode-select --install`).
-2. Create and activate a virtual environment:
+> **Tip:** All commands assume the Terminal app on macOS. Copy and paste the code blocks exactly as written.
+
+### 1. One-time macOS prerequisites
+
+1. **Update macOS.** Open **System Settings → General → Software Update** and install any pending updates. Reboot if asked.
+2. **Install Xcode Command Line Tools.** Run the following command and confirm any prompts:
+   ```bash
+   xcode-select --install
+   ```
+3. **Install Homebrew (optional but recommended).** If you do not already have it:
+   ```bash
+   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+   ```
+   Homebrew simplifies installing Python and other utilities. If you already have an up-to-date Python 3.10+ you can skip this step.
+
+### 2. Prepare a clean workspace
+
+1. **Choose a folder** where you want the project to live (e.g., `~/Projects`).
+2. **Open Terminal** and navigate there, replacing the example path if needed:
+   ```bash
+   cd ~/Projects
+   ```
+3. **Clone the repository** (or download it as a ZIP and unzip it). Cloning keeps the folder name `Anki_JPDeck_Autobuilder`:
+   ```bash
+   git clone https://github.com/<your-fork-or-source>/Anki_JPDeck_Autobuilder.git
+   cd Anki_JPDeck_Autobuilder
+   ```
+
+### 3. Create an isolated Python environment
+
+1. **Ensure Python 3.10 or newer is available.** Verify with:
+   ```bash
+   python3 --version
+   ```
+   If the version is older than 3.10, install a newer Python via Homebrew (`brew install python@3.11`) and rerun the command.
+2. **Create a virtual environment** inside the project folder:
    ```bash
    python3 -m venv .venv
+   ```
+3. **Activate the environment** (do this in every new Terminal session before running project commands):
+   ```bash
    source .venv/bin/activate
    ```
-3. Install the project dependencies (including PyInstaller):
-   ```bash
-   pip install typer[all] rich requests genanki unidecode python-slugify gTTS PyInstaller
-   ```
-4. Build the bundle:
+   After activation the prompt will show `(.venv)` at the start—this confirms you are using the isolated environment.
+
+### 4. Install Python dependencies
+
+With the virtual environment active, install every required package—including PyInstaller—using a single pip command:
+
+```bash
+pip install --upgrade pip
+pip install typer[all] rich requests genanki unidecode python-slugify gTTS PyInstaller
+```
+
+If you prefer to rely on the project’s `Makefile`, you can instead run `make install`, which executes the same installation step.
+
+### 5. Build the macOS app bundle
+
+1. **Double-check you are still inside the virtual environment** (`(.venv)` should be visible in the prompt).
+2. **Run the dedicated Make target** that wraps PyInstaller:
    ```bash
    make macos-app
    ```
+   The command uses `mac_gui_app.spec` to produce a signed-but-unnotarized app bundle.
+3. **Wait for completion.** On success, PyInstaller prints a summary and leaves the finished bundle at:
+   ```
+   dist/AnkiJPDeckBuilder.app
+   ```
 
-PyInstaller will place `AnkiJPDeckBuilder.app` under `dist/`. You can double-click the app to launch the GUI without opening a
-terminal window.
+### 6. First launch & Gatekeeper prompts
+
+1. In Finder, open the project folder, then open `dist/`.
+2. Control-click (`⌃` + click) `AnkiJPDeckBuilder.app` and choose **Open**. macOS Gatekeeper will warn that the app is from an
+   unidentified developer.
+3. Click **Open** in the dialog. macOS will remember your decision, so you can double-click the app normally next time.
+
+### 7. Optional: Create a distributable ZIP
+
+If you want to share the app with others:
+
+```bash
+cd dist
+zip -r AnkiJPDeckBuilder-macOS.zip AnkiJPDeckBuilder.app
+```
+
+The resulting ZIP can be sent to other macOS users. They will need to perform the same Control-click → Open step the first time they launch it.
 
 ### Troubleshooting on macOS
 
