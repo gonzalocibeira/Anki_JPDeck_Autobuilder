@@ -25,7 +25,7 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple
 from urllib.parse import quote
 
 try:
@@ -112,6 +112,138 @@ class CardData:
             f"<div>{img_tag}</div>",
         ]
 
+
+# -----------------------------
+# Build orchestration types
+# -----------------------------
+
+
+class BuildError(RuntimeError):
+    """Raised when the build process cannot complete."""
+
+    def __init__(self, message: str, *, exit_code: int = 1) -> None:
+        super().__init__(message)
+        self.exit_code = exit_code
+
+
+@dataclass
+class BuildParams:
+    csv_path: Path
+    output_dir: Path
+    new_deck: bool
+    deck_name: str = DEFAULT_DECK_NAME
+    config_path: Optional[Path] = None
+    debug: bool = False
+
+
+@dataclass
+class BuildResult:
+    deck_name: str
+    deck_id: int
+    model_id: int
+    apkg_path: Path
+    config_path: Path
+    total_terms: int
+    notes_added: int
+    media_files: List[str]
+
+
+class BuildReporter(Protocol):
+    def info(self, message: str) -> None:
+        ...
+
+    def warning(self, message: str) -> None:
+        ...
+
+    def error(self, message: str) -> None:
+        ...
+
+    def debug(self, message: str) -> None:
+        ...
+
+    def progress_start(self, total: int, description: str = "") -> None:
+        ...
+
+    def progress_advance(self, advance: int = 1) -> None:
+        ...
+
+    def progress_finish(self) -> None:
+        ...
+
+
+class NullBuildReporter:
+    """Default reporter that swallows all events."""
+
+    def info(self, message: str) -> None:
+        return None
+
+    def warning(self, message: str) -> None:
+        return None
+
+    def error(self, message: str) -> None:
+        return None
+
+    def debug(self, message: str) -> None:
+        return None
+
+    def progress_start(self, total: int, description: str = "") -> None:
+        return None
+
+    def progress_advance(self, advance: int = 1) -> None:
+        return None
+
+    def progress_finish(self) -> None:
+        return None
+
+
+class RichBuildReporter(NullBuildReporter):
+    """Reporter implementation that proxies events to a Rich console."""
+
+    def __init__(self, console: Console) -> None:
+        self.console = console
+        self._progress: Optional[Progress] = None
+        self._task_id: Optional[int] = None
+
+    def info(self, message: str) -> None:
+        self.console.print(f"[green]{message}[/]")
+
+    def warning(self, message: str) -> None:
+        self.console.print(f"[yellow]{message}[/]")
+
+    def error(self, message: str) -> None:
+        self.console.print(f"[red]{message}[/]")
+
+    def debug(self, message: str) -> None:
+        self.console.log(f"[magenta]DEBUG {message}")
+
+    def progress_start(self, total: int, description: str = "") -> None:
+        if self._progress is not None:
+            return
+        description = description or "Working..."
+        self._progress = Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TimeElapsedColumn(),
+            TimeRemainingColumn(),
+            console=self.console,
+        )
+        self._progress.__enter__()
+        self._task_id = self._progress.add_task(description, total=total)
+
+    def progress_advance(self, advance: int = 1) -> None:
+        if self._progress is None or self._task_id is None:
+            return
+        self._progress.advance(self._task_id, advance)
+
+    def progress_finish(self) -> None:
+        if self._progress is None:
+            return
+        progress = self._progress
+        self._progress = None
+        self._task_id = None
+        progress.__exit__(None, None, None)
+
 # -----------------------------
 # Helpers
 # -----------------------------
@@ -162,7 +294,14 @@ def deterministic_guid(*parts: str) -> int:
 # Fetchers (no-auth public sources)
 # -----------------------------
 
-def _debug_print(source: str, term: str, payload: Any, *, limit: int = 600) -> None:
+def _debug_print(
+    source: str,
+    term: str,
+    payload: Any,
+    *,
+    limit: int = 600,
+    logger: Optional[Callable[[str], None]] = None,
+) -> None:
     """Render a concise, human-readable snippet for debug output."""
     try:
         if isinstance(payload, str):
@@ -175,7 +314,11 @@ def _debug_print(source: str, term: str, payload: Any, *, limit: int = 600) -> N
     if len(normalized) > limit:
         normalized = normalized[: limit - 1].rstrip() + "…"
 
-    console.log(f"[cyan]DEBUG {source} response for '{term}':[/] {normalized}")
+    message = f"DEBUG {source} response for '{term}': {normalized}"
+    if logger is not None:
+        logger(message)
+    else:
+        console.log(f"[cyan]{message}")
 
 
 def _require_requests() -> None:
@@ -270,12 +413,18 @@ def generate_sentence_audio(sentence: str, media_dir: Path) -> str:
         return ""
 
 
-def fetch_jisho(term: str, debug: bool = False) -> Tuple[str, str]:
+def fetch_jisho(
+    term: str,
+    debug: bool = False,
+    logger: Optional[Callable[[str], None]] = None,
+) -> Tuple[str, str]:
     """Return (reading_kana, english_glosses) from Jisho for a term."""
     _require_requests()
     try:
         resp = requests.get(JISHO_URL, params={"keyword": term}, headers=HEADERS, timeout=15)
-        if debug:
+        if debug and logger is not None:
+            logger(f"DEBUG raw Jisho response for '{term}': {resp.text}")
+        elif debug:
             console.log(
                 f"[cyan]DEBUG Jisho response for '{term}':[/] {resp.text}"
             )
@@ -296,7 +445,7 @@ def fetch_jisho(term: str, debug: bool = False) -> Tuple[str, str]:
                     "english_definitions": first_sense.get("english_definitions", []),
                     "tags": first_sense.get("tags", []),
                 }
-            _debug_print("Jisho", term, summary)
+            _debug_print("Jisho", term, summary, logger=logger)
         if not data.get("data"):
             return "", ""
         first = data["data"][0]
@@ -319,7 +468,11 @@ def fetch_jisho(term: str, debug: bool = False) -> Tuple[str, str]:
         return "", ""
 
 
-def fetch_tatoeba_example(term: str, debug: bool = False) -> Tuple[str, str]:
+def fetch_tatoeba_example(
+    term: str,
+    debug: bool = False,
+    logger: Optional[Callable[[str], None]] = None,
+) -> Tuple[str, str]:
     """Return (jp_sentence, en_translation) from Tatoeba.
     Handles API shapes where 'translations' may be a list of dicts or grouped lists.
     Prefers results marked as "native" and chooses the longest available sentence.
@@ -435,7 +588,7 @@ def fetch_tatoeba_example(term: str, debug: bool = False) -> Tuple[str, str]:
                 "total": len(results) if isinstance(results, list) else 0,
                 "sample": sample_result,
             }
-            _debug_print("Tatoeba", term, summary)
+            _debug_print("Tatoeba", term, summary, logger=logger)
 
         candidates = _collect_candidates(payload, native=bool(extra_params.get("native")))
         return payload, candidates
@@ -464,7 +617,11 @@ def fetch_tatoeba_example(term: str, debug: bool = False) -> Tuple[str, str]:
         return "", ""
 
 
-def fetch_kotobank_ja_definition(term: str, debug: bool = False) -> str:
+def fetch_kotobank_ja_definition(
+    term: str,
+    debug: bool = False,
+    logger: Optional[Callable[[str], None]] = None,
+) -> str:
     """Return a short JP definition from Kotobank's 国語辞典."""
     _require_requests()
     encoded = quote(term, safe="")
@@ -474,7 +631,7 @@ def fetch_kotobank_ja_definition(term: str, debug: bool = False) -> str:
             resp = requests.get(url, headers=HEADERS, timeout=15)
             resp.raise_for_status()
             if debug:
-                _debug_print("Kotobank", term, f"URL: {url}\n{resp.text}")
+                _debug_print("Kotobank", term, f"URL: {url}\n{resp.text}", logger=logger)
         except Exception as e:
             console.log(f"[yellow]Kotobank fetch failed for '{term}' at {url}: {e}")
             continue
@@ -485,7 +642,11 @@ def fetch_kotobank_ja_definition(term: str, debug: bool = False) -> str:
     return ""
 
 
-def fetch_wiktionary_ja_definition(term: str, debug: bool = False) -> str:
+def fetch_wiktionary_ja_definition(
+    term: str,
+    debug: bool = False,
+    logger: Optional[Callable[[str], None]] = None,
+) -> str:
     """Return the first Japanese definition from Japanese Wiktionary."""
     _require_requests()
     try:
@@ -510,7 +671,7 @@ def fetch_wiktionary_ja_definition(term: str, debug: bool = False) -> str:
                 "title": first_page.get("title"),
                 "extract_preview": (first_page.get("extract", "") or "")[:400],
             }
-            _debug_print("Wiktionary JA", term, summary)
+            _debug_print("Wiktionary JA", term, summary, logger=logger)
         if not pages:
             return ""
         page = next(iter(pages.values())) or {}
@@ -523,7 +684,11 @@ def fetch_wiktionary_ja_definition(term: str, debug: bool = False) -> str:
         return ""
 
 
-def fetch_wikipedia_ja_definition(term: str, debug: bool = False) -> str:
+def fetch_wikipedia_ja_definition(
+    term: str,
+    debug: bool = False,
+    logger: Optional[Callable[[str], None]] = None,
+) -> str:
     """Return a short JP extract from Japanese Wikipedia (if any)."""
     _require_requests()
     try:
@@ -538,7 +703,9 @@ def fetch_wikipedia_ja_definition(term: str, debug: bool = False) -> str:
         }
         r = requests.get(WIKIPEDIA_JA_API, params=params, headers=HEADERS, timeout=15)
         r.raise_for_status()
-        if debug:
+        if debug and logger is not None:
+            logger(f"DEBUG raw Wikipedia JA response for '{term}': {r.text}")
+        elif debug:
             console.log(
                 f"[cyan]DEBUG Wikipedia JA response for '{term}':[/] {r.text}"
             )
@@ -553,7 +720,7 @@ def fetch_wikipedia_ja_definition(term: str, debug: bool = False) -> str:
                 "title": first_page.get("title"),
                 "extract_preview": (first_page.get("extract", "") or "")[:400],
             }
-            _debug_print("Wikipedia JA", term, summary)
+            _debug_print("Wikipedia JA", term, summary, logger=logger)
         pages = (j.get("query", {}) or {}).get("pages", {})
         if not pages:
             return ""
@@ -694,34 +861,55 @@ def make_note(model: genanki.Model, cd: CardData) -> genanki.Note:
 # Main logic
 # -----------------------------
 
-def gather_for_term(term: str, media_dir: Path, debug: bool = False) -> CardData:
-    reading, english = fetch_jisho(term, debug=debug)
+def gather_for_term(
+    term: str,
+    media_dir: Path,
+    debug: bool = False,
+    logger: Optional[Callable[[str], None]] = None,
+) -> CardData:
+    reading, english = fetch_jisho(term, debug=debug, logger=logger)
     if debug:
-        console.log(
-            f"[magenta]DEBUG Parsed Jisho for '{term}': reading={reading!r}, english={english!r}"
+        message = (
+            f"Parsed Jisho for '{term}': reading={reading!r}, english={english!r}"
         )
-    jp_ex, en_ex = fetch_tatoeba_example(term, debug=debug)
+        if logger is not None:
+            logger(message)
+        else:
+            console.log(f"[magenta]DEBUG {message}")
+    jp_ex, en_ex = fetch_tatoeba_example(term, debug=debug, logger=logger)
     if debug:
-        console.log(
-            f"[magenta]DEBUG Parsed Tatoeba for '{term}': sentence_jp={jp_ex!r}, sentence_en={en_ex!r}"
+        message = (
+            f"Parsed Tatoeba for '{term}': sentence_jp={jp_ex!r}, sentence_en={en_ex!r}"
         )
-    defi = fetch_wikipedia_ja_definition(term, debug=debug)
+        if logger is not None:
+            logger(message)
+        else:
+            console.log(f"[magenta]DEBUG {message}")
+    defi = fetch_wikipedia_ja_definition(term, debug=debug, logger=logger)
     if debug:
-        console.log(
-            f"[magenta]DEBUG Parsed Wikipedia definition for '{term}': definition={defi!r}"
-        )
+        message = f"Parsed Wikipedia definition for '{term}': definition={defi!r}"
+        if logger is not None:
+            logger(message)
+        else:
+            console.log(f"[magenta]DEBUG {message}")
     if not defi:
-        defi = fetch_wiktionary_ja_definition(term, debug=debug)
+        defi = fetch_wiktionary_ja_definition(term, debug=debug, logger=logger)
         if debug:
-            console.log(
-                f"[magenta]DEBUG Parsed Wiktionary definition for '{term}': definition={defi!r}"
+            message = (
+                f"Parsed Wiktionary definition for '{term}': definition={defi!r}"
             )
+            if logger is not None:
+                logger(message)
+            else:
+                console.log(f"[magenta]DEBUG {message}")
     if not defi:
-        defi = fetch_kotobank_ja_definition(term, debug=debug)
+        defi = fetch_kotobank_ja_definition(term, debug=debug, logger=logger)
         if debug:
-            console.log(
-                f"[magenta]DEBUG Parsed Kotobank definition for '{term}': definition={defi!r}"
-            )
+            message = f"Parsed Kotobank definition for '{term}': definition={defi!r}"
+            if logger is not None:
+                logger(message)
+            else:
+                console.log(f"[magenta]DEBUG {message}")
     search_terms: List[str] = [term]
     if reading and reading not in search_terms:
         search_terms.append(reading)
@@ -769,6 +957,89 @@ def load_config(config_path: Path) -> Tuple[int, int, str]:
     return int(j["deck_id"]), int(j["model_id"]), str(j["deck_name"])  # type: ignore
 
 
+def run_builder(
+    params: BuildParams, reporter: Optional[BuildReporter] = None
+) -> BuildResult:
+    reporter = reporter or NullBuildReporter()
+
+    out_dir = params.output_dir
+    out_dir.mkdir(parents=True, exist_ok=True)
+    media_dir = out_dir / MEDIA_DIR_NAME
+    media_dir.mkdir(parents=True, exist_ok=True)
+
+    csv_file = params.csv_path
+    if not csv_file.exists():
+        raise BuildError(f"CSV not found: {csv_file}")
+
+    config_path = params.config_path or (out_dir / CONFIG_FILE)
+    deck_name = params.deck_name
+
+    if params.new_deck or not config_path.exists():
+        deck_id = random.randrange(1 << 30, 1 << 31)
+        model_id = random.randrange(1 << 30, 1 << 31)
+        save_config(config_path, deck_id, model_id, deck_name)
+        reporter.info(f"New deck config saved to {config_path}")
+    else:
+        deck_id, model_id, saved_deck_name = load_config(config_path)
+        if deck_name == DEFAULT_DECK_NAME:
+            deck_name = saved_deck_name
+        reporter.info(f"Loaded existing config from {config_path}")
+
+    deck = genanki.Deck(deck_id, deck_name)
+    model = build_model(model_id)
+
+    terms = read_csv_single_column(csv_file)
+    if not terms:
+        raise BuildError("No terms found in CSV. Exiting.", exit_code=0)
+
+    media_files: List[str] = []
+    card_data_list: List[CardData] = []
+
+    reporter.progress_start(len(terms), description="Fetching data...")
+    debug_logger = reporter.debug if params.debug else None
+    try:
+        for term in terms:
+            cd = gather_for_term(term, media_dir, debug=params.debug, logger=debug_logger)
+            card_data_list.append(cd)
+            if cd.image_filename:
+                media_files.append(str(media_dir / cd.image_filename))
+            if cd.audio_filename:
+                media_files.append(str(media_dir / cd.audio_filename))
+            if cd.sentence_audio_filename:
+                media_files.append(str(media_dir / cd.sentence_audio_filename))
+            reporter.progress_advance()
+    finally:
+        reporter.progress_finish()
+
+    added = 0
+    for cd in card_data_list:
+        note = make_note(model, cd)
+        try:
+            deck.add_note(note)
+            added += 1
+        except Exception as e:
+            reporter.warning(f"Skipped note for '{cd.term}': {e}")
+
+    apkg_name = f"{safe_filename(deck_name)}.apkg"
+    apkg_path = out_dir / apkg_name
+    pkg = genanki.Package(deck)
+    pkg.media_files = media_files
+    pkg.write_to_file(str(apkg_path))
+
+    reporter.info(f"Deck package created at {apkg_path}")
+
+    return BuildResult(
+        deck_name=deck_name,
+        deck_id=deck_id,
+        model_id=model_id,
+        apkg_path=apkg_path,
+        config_path=config_path,
+        total_terms=len(terms),
+        notes_added=added,
+        media_files=media_files,
+    )
+
+
 @app.command()
 def build(
     csv_path: str = typer.Option(..., prompt=True, help="Path to CSV with one Japanese term per row."),
@@ -785,97 +1056,41 @@ def build(
     debug: bool = typer.Option(
         False, "--debug", help="Print summarized API responses and parsed text values."
     ),
-):
+): 
     """Build or append an Anki deck from a CSV list of Japanese terms."""
-    out_dir = Path(output_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    media_dir = out_dir / MEDIA_DIR_NAME
-    media_dir.mkdir(parents=True, exist_ok=True)
-
-    csv_file = Path(csv_path)
-    if not csv_file.exists():
-        console.print(f"[red]CSV not found:[/] {csv_file}")
+    params = BuildParams(
+        csv_path=Path(csv_path),
+        output_dir=Path(output_dir),
+        new_deck=new_deck,
+        deck_name=deck_name,
+        config_path=Path(config) if config else None,
+        debug=debug,
+    )
+    reporter = RichBuildReporter(console)
+    try:
+        result = run_builder(params, reporter)
+    except BuildError as exc:
+        console.print(f"[red]{exc}")
+        raise typer.Exit(code=exc.exit_code)
+    except Exception as exc:
+        console.print(f"[red]Unexpected error:[/] {exc}")
         raise typer.Exit(code=1)
-
-    # Determine deck/model IDs
-    config_path = Path(config) if config else (out_dir / CONFIG_FILE)
-    if new_deck or not config_path.exists():
-        # Create fresh IDs; store config to allow future appends
-        deck_id = random.randrange(1 << 30, 1 << 31)
-        model_id = random.randrange(1 << 30, 1 << 31)
-        save_config(config_path, deck_id, model_id, deck_name)
-        console.print(f"[green]New deck config saved to[/] {config_path}")
-    else:
-        deck_id, model_id, saved_deck_name = load_config(config_path)
-        if deck_name == DEFAULT_DECK_NAME:
-            deck_name = saved_deck_name
-        console.print(f"[cyan]Loaded existing config from[/] {config_path}")
-
-    deck = genanki.Deck(deck_id, deck_name)
-    model = build_model(model_id)
-
-    # Read terms
-    terms = read_csv_single_column(csv_file)
-    if not terms:
-        console.print("[yellow]No terms found in CSV. Exiting.")
-        raise typer.Exit(code=0)
-
-    # Fetch & build notes with progress
-    media_files: List[str] = []
-    card_data_list: List[CardData] = []
-
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TimeElapsedColumn(),
-        TimeRemainingColumn(),
-        console=console,
-    ) as progress:
-        task = progress.add_task("Fetching data...", total=len(terms))
-        for term in terms:
-            cd = gather_for_term(term, media_dir, debug=debug)
-            card_data_list.append(cd)
-            if cd.image_filename:
-                media_files.append(str(media_dir / cd.image_filename))
-            if cd.audio_filename:
-                media_files.append(str(media_dir / cd.audio_filename))
-            if cd.sentence_audio_filename:
-                media_files.append(str(media_dir / cd.sentence_audio_filename))
-            progress.advance(task)
-
-    # Add notes
-    added = 0
-    for cd in card_data_list:
-        note = make_note(model, cd)
-        try:
-            deck.add_note(note)
-            added += 1
-        except Exception as e:
-            console.log(f"[yellow]Skipped note for '{cd.term}': {e}")
-
-    # Package deck
-    apkg_name = f"{safe_filename(deck_name)}.apkg"
-    apkg_path = out_dir / apkg_name
-    pkg = genanki.Package(deck)
-    pkg.media_files = media_files
-    pkg.write_to_file(str(apkg_path))
 
     # Summary
     table = Table(title="Build Summary", show_lines=True)
     table.add_column("Metric", justify="right")
     table.add_column("Value", justify="left")
-    table.add_row("Terms in CSV", str(len(terms)))
-    table.add_row("Notes added", str(added))
-    table.add_row("Media files", str(len(media_files)))
-    table.add_row("Output", str(apkg_path))
-    table.add_row("Config", str(config_path))
+    table.add_row("Terms in CSV", str(result.total_terms))
+    table.add_row("Notes added", str(result.notes_added))
+    table.add_row("Media files", str(len(result.media_files)))
+    table.add_row("Output", str(result.apkg_path))
+    table.add_row("Config", str(result.config_path))
     console.print(table)
 
     console.print("[green]Done![/] Import the .apkg into Anki. If you used the same config (deck/model IDs), new cards will append into the existing deck.")
 
     if debug:
-        log_path = out_dir / "anki_deck_builder_debug_log.txt"
+        log_path = params.output_dir / "anki_deck_builder_debug_log.txt"
         log_text = console.export_text(clear=False, styles=False)
         log_path.write_text(log_text, encoding="utf-8")
         console.print(f"[cyan]Debug log saved to[/] {log_path}")
