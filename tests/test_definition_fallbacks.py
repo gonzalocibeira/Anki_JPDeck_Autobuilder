@@ -65,6 +65,9 @@ if "rich.progress" not in sys.modules:
         def update(self, *args, **kwargs):  # pragma: no cover
             pass
 
+        def advance(self, *args, **kwargs):  # pragma: no cover
+            pass
+
     class _DummyColumn:
         def __init__(self, *args, **kwargs):
             pass
@@ -165,8 +168,16 @@ class DummyResponse:
 
 
 def _patch_common_fetchers(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(adb, "fetch_jisho", lambda term, debug=False: ("よみ", "english"))
-    monkeypatch.setattr(adb, "fetch_tatoeba_example", lambda term, debug=False: ("例文", "Example"))
+    monkeypatch.setattr(
+        adb,
+        "fetch_jisho",
+        lambda term, debug=False, logger=None: ("よみ", "english"),
+    )
+    monkeypatch.setattr(
+        adb,
+        "fetch_tatoeba_example",
+        lambda term, debug=False, logger=None: ("例文", "Example"),
+    )
     monkeypatch.setattr(adb, "fetch_duckduckgo_image", lambda term, media_dir: "")
 
 
@@ -203,17 +214,26 @@ def test_gather_for_term_uses_wikipedia_definition_first(monkeypatch: pytest.Mon
     monkeypatch.setattr(
         adb,
         "fetch_wikipedia_ja_definition",
-        lambda term, debug=False: calls.__setitem__("wikipedia", calls["wikipedia"] + 1) or "Wiki",
+        lambda term, debug=False, logger=None: calls.__setitem__(
+            "wikipedia", calls["wikipedia"] + 1
+        )
+        or "Wiki",
     )
     monkeypatch.setattr(
         adb,
         "fetch_wiktionary_ja_definition",
-        lambda term, debug=False: calls.__setitem__("wiktionary", calls["wiktionary"] + 1) or "Wiktionary",
+        lambda term, debug=False, logger=None: calls.__setitem__(
+            "wiktionary", calls["wiktionary"] + 1
+        )
+        or "Wiktionary",
     )
     monkeypatch.setattr(
         adb,
         "fetch_kotobank_ja_definition",
-        lambda term, debug=False: calls.__setitem__("kotobank", calls["kotobank"] + 1) or "Kotobank",
+        lambda term, debug=False, logger=None: calls.__setitem__(
+            "kotobank", calls["kotobank"] + 1
+        )
+        or "Kotobank",
     )
 
     card = adb.gather_for_term("語", tmp_path)
@@ -230,17 +250,26 @@ def test_gather_for_term_falls_back_to_wiktionary(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(
         adb,
         "fetch_wikipedia_ja_definition",
-        lambda term, debug=False: calls.__setitem__("wikipedia", calls["wikipedia"] + 1) or "",
+        lambda term, debug=False, logger=None: calls.__setitem__(
+            "wikipedia", calls["wikipedia"] + 1
+        )
+        or "",
     )
     monkeypatch.setattr(
         adb,
         "fetch_wiktionary_ja_definition",
-        lambda term, debug=False: calls.__setitem__("wiktionary", calls["wiktionary"] + 1) or "Wiktionary",
+        lambda term, debug=False, logger=None: calls.__setitem__(
+            "wiktionary", calls["wiktionary"] + 1
+        )
+        or "Wiktionary",
     )
     monkeypatch.setattr(
         adb,
         "fetch_kotobank_ja_definition",
-        lambda term, debug=False: calls.__setitem__("kotobank", calls["kotobank"] + 1) or "Kotobank",
+        lambda term, debug=False, logger=None: calls.__setitem__(
+            "kotobank", calls["kotobank"] + 1
+        )
+        or "Kotobank",
     )
 
     card = adb.gather_for_term("語", tmp_path)
@@ -257,17 +286,26 @@ def test_gather_for_term_falls_back_to_kotobank(monkeypatch: pytest.MonkeyPatch,
     monkeypatch.setattr(
         adb,
         "fetch_wikipedia_ja_definition",
-        lambda term, debug=False: calls.__setitem__("wikipedia", calls["wikipedia"] + 1) or "",
+        lambda term, debug=False, logger=None: calls.__setitem__(
+            "wikipedia", calls["wikipedia"] + 1
+        )
+        or "",
     )
     monkeypatch.setattr(
         adb,
         "fetch_wiktionary_ja_definition",
-        lambda term, debug=False: calls.__setitem__("wiktionary", calls["wiktionary"] + 1) or "",
+        lambda term, debug=False, logger=None: calls.__setitem__(
+            "wiktionary", calls["wiktionary"] + 1
+        )
+        or "",
     )
     monkeypatch.setattr(
         adb,
         "fetch_kotobank_ja_definition",
-        lambda term, debug=False: calls.__setitem__("kotobank", calls["kotobank"] + 1) or "Kotobank",
+        lambda term, debug=False, logger=None: calls.__setitem__(
+            "kotobank", calls["kotobank"] + 1
+        )
+        or "Kotobank",
     )
 
     card = adb.gather_for_term("語", tmp_path)
