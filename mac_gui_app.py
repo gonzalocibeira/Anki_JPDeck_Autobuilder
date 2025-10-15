@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -19,15 +20,51 @@ from anki_deck_builder import (
 class TkBuildReporter(NullBuildReporter):
     """Report build progress to the Tkinter UI."""
 
-    def __init__(self, root: tk.Tk, status_var: tk.StringVar, progress: ttk.Progressbar) -> None:
+    def __init__(
+        self,
+        root: tk.Tk,
+        status_var: tk.StringVar,
+        progress: ttk.Progressbar,
+        time_var: tk.StringVar,
+    ) -> None:
         super().__init__()
         self.root = root
         self.status_var = status_var
         self.progress = progress
+        self.time_var = time_var
+        self._start_time: float | None = None
+        self._completed = 0
         self._total = 0
 
     def _dispatch(self, func, *args) -> None:
         self.root.after(0, lambda: func(*args))
+
+    def _format_duration(self, seconds: float | None) -> str:
+        if seconds is None:
+            return "--"
+        seconds = max(0, int(seconds))
+        hours, remainder = divmod(seconds, 3600)
+        minutes, secs = divmod(remainder, 60)
+        return f"{hours:02}:{minutes:02}:{secs:02}"
+
+    def _schedule_time_update(self) -> None:
+        if self._start_time is None:
+            return
+
+        elapsed = max(time.time() - self._start_time, 0)
+        remaining: float | None = None
+        if self._total and self._completed >= self._total:
+            remaining = 0
+        elif self._total and self._completed > 0 and elapsed > 0:
+            rate = self._completed / elapsed
+            if rate > 0:
+                remaining = max((self._total - self._completed) / rate, 0)
+
+        display = (
+            f"Elapsed: {self._format_duration(elapsed)} — "
+            f"Remaining: {self._format_duration(remaining)}"
+        )
+        self._dispatch(self.time_var.set, display)
 
     def info(self, message: str) -> None:
         self._dispatch(self.status_var.set, message)
@@ -43,17 +80,31 @@ class TkBuildReporter(NullBuildReporter):
 
     def progress_start(self, total: int, description: str = "") -> None:
         self._total = total
+        self._completed = 0
+        self._start_time = time.time()
+
         def setup() -> None:
             self.progress.config(maximum=max(total, 1))
             self.progress["value"] = 0
             if description:
                 self.status_var.set(description)
+            self.time_var.set(
+                f"Elapsed: {self._format_duration(0)} — Remaining: {self._format_duration(None)}"
+            )
+
         self._dispatch(setup)
 
     def progress_advance(self, advance: int = 1) -> None:
+        self._completed += advance
+        if self._total:
+            self._completed = min(self._completed, self._total)
+        self._schedule_time_update()
         self._dispatch(self.progress.step, advance)
 
     def progress_finish(self) -> None:
+        self._completed = self._total
+        self._schedule_time_update()
+
         def finish() -> None:
             if self._total:
                 self.progress['value'] = self._total
@@ -71,6 +122,7 @@ class BuilderGUI:
         self.new_deck_var = tk.BooleanVar(value=True)
         self.config_path_var = tk.StringVar()
         self.status_var = tk.StringVar(value="Idle")
+        self.time_var = tk.StringVar(value="Elapsed: 00:00 — Remaining: --")
 
         self._build_thread: threading.Thread | None = None
 
@@ -114,13 +166,18 @@ class BuilderGUI:
         # Status label
         ttk.Label(frame, textvariable=self.status_var).grid(column=0, row=5, columnspan=3, sticky="w", **padding)
 
+        # Time label
+        ttk.Label(frame, textvariable=self.time_var).grid(
+            column=0, row=6, columnspan=3, sticky="w", **padding
+        )
+
         # Progress bar
         self.progress = ttk.Progressbar(frame, orient="horizontal", mode="determinate")
-        self.progress.grid(column=0, row=6, columnspan=3, sticky="ew", **padding)
+        self.progress.grid(column=0, row=7, columnspan=3, sticky="ew", **padding)
 
         # Build button
         self.build_button = ttk.Button(frame, text="Build", command=self._start_build)
-        self.build_button.grid(column=0, row=7, columnspan=3, sticky="ew", **padding)
+        self.build_button.grid(column=0, row=8, columnspan=3, sticky="ew", **padding)
 
         frame.columnconfigure(1, weight=1)
 
@@ -173,7 +230,7 @@ class BuilderGUI:
             debug=False,
         )
 
-        reporter = TkBuildReporter(self.root, self.status_var, self.progress)
+        reporter = TkBuildReporter(self.root, self.status_var, self.progress, self.time_var)
         self.status_var.set("Starting build...")
         self.progress.config(value=0)
         self.build_button.config(state=tk.DISABLED)
