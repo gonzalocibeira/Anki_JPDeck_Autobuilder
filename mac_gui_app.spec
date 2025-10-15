@@ -127,5 +127,9 @@ app = BUNDLE(
     bundle_identifier='com.example.ankijpdeckbuilder',
     info_plist={
         'LSMinimumSystemVersion': '10.13.0',
+        'LSMinimumSystemVersionByArchitecture': {
+            'x86_64': '10.13.0',
+            'arm64': '11.0.0',
+        },
     },
 )
