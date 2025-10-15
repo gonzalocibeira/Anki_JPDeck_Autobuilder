@@ -137,47 +137,54 @@ class BuilderGUI:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
 
+        # Header
+        ttk.Label(
+            frame,
+            text="Made by Turco Cibeira",
+            font=("TkDefaultFont", 12, "italic"),
+        ).grid(column=0, row=0, columnspan=3, sticky="w", **padding)
+
         # CSV path
-        ttk.Label(frame, text="CSV Path:").grid(column=0, row=0, sticky="w", **padding)
+        ttk.Label(frame, text="CSV Path:").grid(column=0, row=1, sticky="w", **padding)
         csv_entry = ttk.Entry(frame, textvariable=self.csv_path_var, width=40)
-        csv_entry.grid(column=1, row=0, sticky="ew", **padding)
-        ttk.Button(frame, text="Browse", command=self._choose_csv).grid(column=2, row=0, **padding)
+        csv_entry.grid(column=1, row=1, sticky="ew", **padding)
+        ttk.Button(frame, text="Browse", command=self._choose_csv).grid(column=2, row=1, **padding)
 
         # Output directory
-        ttk.Label(frame, text="Output Directory:").grid(column=0, row=1, sticky="w", **padding)
+        ttk.Label(frame, text="Output Directory:").grid(column=0, row=2, sticky="w", **padding)
         output_entry = ttk.Entry(frame, textvariable=self.output_dir_var, width=40)
-        output_entry.grid(column=1, row=1, sticky="ew", **padding)
-        ttk.Button(frame, text="Browse", command=self._choose_output_dir).grid(column=2, row=1, **padding)
+        output_entry.grid(column=1, row=2, sticky="ew", **padding)
+        ttk.Button(frame, text="Browse", command=self._choose_output_dir).grid(column=2, row=2, **padding)
 
         # Deck name
-        ttk.Label(frame, text="Deck Name:").grid(column=0, row=2, sticky="w", **padding)
-        ttk.Entry(frame, textvariable=self.deck_name_var, width=40).grid(column=1, row=2, sticky="ew", **padding)
+        ttk.Label(frame, text="Deck Name:").grid(column=0, row=3, sticky="w", **padding)
+        ttk.Entry(frame, textvariable=self.deck_name_var, width=40).grid(column=1, row=3, sticky="ew", **padding)
 
         # New deck toggle
         ttk.Checkbutton(frame, text="Create new deck", variable=self.new_deck_var).grid(
-            column=1, row=3, sticky="w", **padding
+            column=1, row=4, sticky="w", **padding
         )
 
         # Config path (optional)
-        ttk.Label(frame, text="Config Path (optional):").grid(column=0, row=4, sticky="w", **padding)
-        ttk.Entry(frame, textvariable=self.config_path_var, width=40).grid(column=1, row=4, sticky="ew", **padding)
-        ttk.Button(frame, text="Browse", command=self._choose_config).grid(column=2, row=4, **padding)
+        ttk.Label(frame, text="Config Path (optional):").grid(column=0, row=5, sticky="w", **padding)
+        ttk.Entry(frame, textvariable=self.config_path_var, width=40).grid(column=1, row=5, sticky="ew", **padding)
+        ttk.Button(frame, text="Browse", command=self._choose_config).grid(column=2, row=5, **padding)
 
         # Status label
-        ttk.Label(frame, textvariable=self.status_var).grid(column=0, row=5, columnspan=3, sticky="w", **padding)
+        ttk.Label(frame, textvariable=self.status_var).grid(column=0, row=6, columnspan=3, sticky="w", **padding)
 
         # Time label
         ttk.Label(frame, textvariable=self.time_var).grid(
-            column=0, row=6, columnspan=3, sticky="w", **padding
+            column=0, row=7, columnspan=3, sticky="w", **padding
         )
 
         # Progress bar
         self.progress = ttk.Progressbar(frame, orient="horizontal", mode="determinate")
-        self.progress.grid(column=0, row=7, columnspan=3, sticky="ew", **padding)
+        self.progress.grid(column=0, row=8, columnspan=3, sticky="ew", **padding)
 
         # Build button
         self.build_button = ttk.Button(frame, text="Build", command=self._start_build)
-        self.build_button.grid(column=0, row=8, columnspan=3, sticky="ew", **padding)
+        self.build_button.grid(column=0, row=9, columnspan=3, sticky="ew", **padding)
 
         frame.columnconfigure(1, weight=1)
 
