@@ -125,4 +125,7 @@ app = BUNDLE(
     name='AnkiJPDeckBuilder.app',
     icon=None,
     bundle_identifier='com.example.ankijpdeckbuilder',
+    info_plist={
+        'LSMinimumSystemVersion': '10.13.0',
+    },
 )
