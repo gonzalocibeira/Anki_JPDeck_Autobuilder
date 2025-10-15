@@ -170,11 +170,28 @@ of the pipeline—including environment setup notes specific to macOS 26, valida
 
 ### 3. Create an isolated Python environment
 
-1. **Ensure Python 3.10 or newer is available.** Verify with:
+1. **Ensure Python 3.10 or newer is available (with Tk support).** Verify with:
    ```bash
    python3 --version
    ```
    If the version is older than 3.10, install a newer Python via Homebrew (`brew install python@3.11`) and rerun the command.
+   The GUI build depends on the standard-library `tkinter` module, so make sure
+   your interpreter bundles it:
+
+   - The [python.org macOS installer](https://www.python.org/downloads/macos/)
+     includes Tk by default and is the simplest option.
+   - For Homebrew-managed Python, install the matching Tk bindings (replace the
+     version suffix if you use a different Python release):
+
+     ```bash
+     brew install python-tk@3.11
+     ```
+
+   You can confirm Tk support is present with:
+
+   ```bash
+   python3 -c "import tkinter; tkinter._test()"
+   ```
 2. **Create a virtual environment** inside the project folder:
    ```bash
    python3 -m venv .venv

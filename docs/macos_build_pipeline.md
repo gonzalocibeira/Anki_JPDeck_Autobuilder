@@ -20,7 +20,23 @@ on macOS 26 or newer with an Apple-provided Python 3.11+ universal build.
 3. **Install a universal2 Python** from python.org (preferred) or Homebrew. The
    runtime embedded by PyInstaller matches the interpreter used for the build,
    so using the universal installer ensures the bundle includes both x86_64 and
-   arm64 binaries.
+   arm64 binaries. The macOS GUI relies on Tk, so make sure the interpreter you
+   install ships with Tk bindings:
+
+   - The official [python.org macOS installer](https://www.python.org/downloads/macos/)
+     bundles `tkinter` out of the box—no extra steps required.
+   - When using Homebrew, add the Tk components explicitly (replace the version
+     suffix so it matches the Python you installed):
+
+     ```bash
+     brew install python-tk@3.11
+     ```
+
+   After installation, confirm Tk support is available before continuing:
+
+   ```bash
+   python3 -c "import tkinter; tkinter._test()"
+   ```
 4. **Create and activate a virtual environment** dedicated to the build:
    ```bash
    python3 -m venv .venv
