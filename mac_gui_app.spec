@@ -21,8 +21,11 @@ def _legacy_collect_tk_assets():
 
     try:
         import tkinter
-    except ImportError:  # pragma: no cover - tkinter not installed
-        return datas
+    except ImportError as exc:  # pragma: no cover - tkinter not installed
+        raise SystemExit(
+            "Tkinter is required to build the macOS GUI app. "
+            "Install a Python distribution with Tk support before continuing."
+        ) from exc
 
     tk_interp = tkinter.Tcl()
 
@@ -81,7 +84,7 @@ a = Analysis(
     pathex=['.'],
     binaries=[],
     datas=tk_datas,
-    hiddenimports=[],
+    hiddenimports=['tkinter', 'tkinter.filedialog', 'tkinter.messagebox', 'tkinter.ttk'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
