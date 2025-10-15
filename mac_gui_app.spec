@@ -109,8 +109,19 @@ exe = EXE(
     entitlements_file=None,
 )
 
-app = BUNDLE(
+coll = COLLECT(
     exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='AnkiJPDeckBuilder',
+)
+
+app = BUNDLE(
+    coll,
     name='AnkiJPDeckBuilder.app',
     icon=None,
     bundle_identifier='com.example.ankijpdeckbuilder',
