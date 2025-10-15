@@ -135,8 +135,10 @@ Contributions and improvements are welcome! Feel free to fork the repository and
 
 ## macOS app packaging (step-by-step)
 
-The repository ships with a Tkinter GUI (`mac_gui_app.py`) and a PyInstaller spec file that builds a native-looking `.app`
-bundle. Follow the checklist below from start to finish—no prior packaging experience is required.
+The repository ships with a Tkinter GUI (`mac_gui_app.py`) and a PyInstaller spec file that builds a native-looking, windowed
+`.app` bundle (the spec sets `console=False`, so the GUI opens without a Terminal window). Follow the checklist below from start to finish—no prior packaging experience is required. For an in-depth explanation
+of the pipeline—including environment setup notes specific to macOS 26, validation commands, and clean-room testing tips—see
+[`docs/macos_build_pipeline.md`](docs/macos_build_pipeline.md).
 
 > **Tip:** All commands assume the Terminal app on macOS. Copy and paste the code blocks exactly as written.
 
@@ -189,7 +191,7 @@ With the virtual environment active, install every required package—including 
 
 ```bash
 pip install --upgrade pip
-pip install typer[all] rich requests genanki unidecode python-slugify gTTS PyInstaller
+pip install -r requirements-macos.txt
 ```
 
 If you prefer to rely on the project’s `Makefile`, you can instead run `make install`, which executes the same installation step.
