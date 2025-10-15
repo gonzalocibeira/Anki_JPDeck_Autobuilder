@@ -214,6 +214,18 @@ If you prefer to rely on the project’s `Makefile`, you can instead run `make i
    unidentified developer.
 3. Click **Open** in the dialog. macOS will remember your decision, so you can double-click the app normally next time.
 
+### 6½. Launching from Terminal (for debugging)
+
+If the window appears briefly and then closes, launch the bundled executable from Terminal so you can see any traceback or
+missing-resource messages:
+
+```bash
+./dist/AnkiJPDeckBuilder.app/Contents/MacOS/AnkiJPDeckBuilder
+```
+
+Leave the Terminal window open while testing—the GUI runs inside the same process, so closing the Terminal will terminate the
+app. Any runtime errors will print to this Terminal session, which makes it easier to diagnose packaging problems.
+
 ### 7. Optional: Create a distributable ZIP
 
 If you want to share the app with others:
