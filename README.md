@@ -84,6 +84,22 @@ When executed, Typer will prompt for any missing options. The command supports t
 | `--deck-name TEXT` | Name of the generated Anki deck. When appending with stored IDs and the default name, the saved deck name is reused. | `Japanese Auto Deck` |
 | `--config PATH` | Path to a JSON file containing `deck_id`, `model_id`, and `deck_name`. Useful for managing multiple deck configurations. | `output_dir/anki_deck_builder.config.json` |
 
+### Preventing macOS sleep during long runs
+
+On macOS laptops, the system may automatically go to sleep after a period of inactivity. When that happens, background processes
+are paused—interrupting deck builds in progress, halting media downloads, and potentially leaving partially generated output in
+your `--output-dir`. To keep the machine awake for the duration of a long run, wrap your command with the built-in `caffeinate`
+utility:
+
+```bash
+caffeinate -im python anki_deck_builder.py build --csv-path terms.csv
+```
+
+- `-i` tells macOS to prevent idle sleep so the CPU keeps working.
+- `-m` blocks the system from sleeping while disk activity is happening (useful for download-heavy builds).
+
+This combination keeps the process running while still allowing the display to sleep normally. When the command exits, `caffeinate` automatically releases the sleep prevention. If you prefer the screen to remain lit for visual confirmation, add `-s`; otherwise, you can leave it off and let the display power down.
+
 ### Example workflow
 
 1. Prepare your vocabulary list in `terms.csv`.
