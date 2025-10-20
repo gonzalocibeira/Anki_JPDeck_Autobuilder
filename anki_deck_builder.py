@@ -24,6 +24,7 @@ import re
 import sys
 import tempfile
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple
 from urllib.parse import quote
@@ -74,6 +75,7 @@ WIKTIONARY_JA_API = "https://ja.wiktionary.org/w/api.php"
 DUCKDUCKGO_BASE = "https://duckduckgo.com/"
 
 DEFAULT_MODEL_NAME = "JP Word w/ Image + Examples (MVP)"
+DEFAULT_GRAMMAR_MODEL_NAME = "JP Grammar Concept (MVP)"
 DEFAULT_DECK_NAME = "Japanese Auto Deck"
 CONFIG_FILE = "anki_deck_builder.config.json"
 MEDIA_DIR_NAME = "media"
@@ -113,6 +115,17 @@ class CardData:
         ]
 
 
+@dataclass
+class GrammarCardData:
+    question: str
+    explanation: str = ""
+    example_jp: str = ""
+    example_en: str = ""
+
+    def to_fields(self) -> List[str]:
+        return [self.question, self.explanation, self.example_jp, self.example_en]
+
+
 # -----------------------------
 # Build orchestration types
 # -----------------------------
@@ -126,6 +139,11 @@ class BuildError(RuntimeError):
         self.exit_code = exit_code
 
 
+class InputMode(str, Enum):
+    VOCABULARY = "vocabulary"
+    GRAMMAR = "grammar"
+
+
 @dataclass
 class BuildParams:
     csv_path: Path
@@ -134,6 +152,7 @@ class BuildParams:
     deck_name: str = DEFAULT_DECK_NAME
     config_path: Optional[Path] = None
     debug: bool = False
+    mode: InputMode = InputMode.VOCABULARY
 
 
 @dataclass
@@ -146,6 +165,7 @@ class BuildResult:
     total_terms: int
     notes_added: int
     media_files: List[str]
+    mode: InputMode
 
 
 class BuildReporter(Protocol):
@@ -278,6 +298,65 @@ def read_csv_single_column(path: Path) -> List[str]:
                 if tokens:
                     words.append(tokens[0])
     return words
+
+
+def read_grammar_csv(path: Path) -> List[GrammarCardData]:
+    """Parse a grammar CSV with question/explanation/example columns."""
+
+    def _normalize(value: str) -> str:
+        return re.sub(r"[^a-z]", "", value.lower())
+
+    required = ["question", "explanation", "example_jp", "example_en"]
+    normalized_lookup = {_normalize(key): key for key in required}
+
+    entries: List[GrammarCardData] = []
+    with path.open("r", encoding="utf-8-sig", newline="") as f:
+        sample = f.read(4096)
+        f.seek(0)
+        try:
+            dialect = csv.Sniffer().sniff(sample)
+        except csv.Error:
+            dialect = csv.excel
+        reader = csv.reader(f, dialect)
+
+        mapping: Optional[Dict[str, int]] = None
+        for row in reader:
+            cells = [cell.strip() for cell in row]
+            if not any(cells):
+                continue
+
+            if mapping is None:
+                normalized = [_normalize(cell) for cell in cells]
+                header_matches = {
+                    normalized_lookup[val]: idx
+                    for idx, val in enumerate(normalized)
+                    if val in normalized_lookup
+                }
+                if len(header_matches) == len(required):
+                    mapping = header_matches
+                    continue
+                mapping = {key: idx for idx, key in enumerate(required)}
+
+            values: Dict[str, str] = {}
+            for key in required:
+                idx = mapping.get(key)
+                value = cells[idx] if idx is not None and idx < len(cells) else ""
+                values[key] = value
+
+            if not values["question"]:
+                # Anki requires the first field to have content; skip invalid rows
+                continue
+
+            entries.append(
+                GrammarCardData(
+                    question=values["question"],
+                    explanation=values["explanation"],
+                    example_jp=values["example_jp"],
+                    example_en=values["example_en"],
+                )
+            )
+
+    return entries
 
 
 def safe_filename(base: str) -> str:
@@ -857,6 +936,49 @@ def make_note(model: genanki.Model, cd: CardData) -> genanki.Note:
     return genanki.Note(model=model, fields=cd.to_fields(), guid=str(nid))
 
 
+def build_grammar_model(
+    model_id: int, name: str = DEFAULT_GRAMMAR_MODEL_NAME
+) -> genanki.Model:
+    css = """
+    .question { font-family: 'Hiragino Kaku Gothic Pro', 'Meiryo', 'Noto Sans JP', sans-serif; font-size: 28px; }
+    .example { margin-top: 12px; font-size: 18px; }
+    .explanation { margin-top: 16px; font-size: 18px; }
+    .card { text-align: left; }
+    """
+    fields = [
+        {"name": "Question"},
+        {"name": "Explanation"},
+        {"name": "ExampleJP"},
+        {"name": "ExampleEN"},
+    ]
+    templates = [
+        {
+            "name": "Grammar Card",
+            "qfmt": """\
+<div class='card'>
+  <div class='question'>{{Question}}</div>
+  {{#ExampleJP}}<div class='example'><b>例文:</b> {{ExampleJP}}</div>{{/ExampleJP}}
+</div>
+""",
+            "afmt": """\
+<div class='card'>
+  <div class='question'>{{Question}}</div>
+  <hr id='answer'>
+  <div class='explanation'><b>解説:</b> {{Explanation}}</div>
+  {{#ExampleJP}}<div class='example'><b>例文:</b> {{ExampleJP}}</div>{{/ExampleJP}}
+  {{#ExampleEN}}<div class='example'><b>English:</b> {{ExampleEN}}</div>{{/ExampleEN}}
+</div>
+""",
+        }
+    ]
+    return genanki.Model(model_id, name, fields=fields, templates=templates, css=css)
+
+
+def make_grammar_note(model: genanki.Model, cd: GrammarCardData) -> genanki.Note:
+    nid = deterministic_guid(cd.question, cd.example_jp or "", cd.example_en or "")
+    return genanki.Note(model=model, fields=cd.to_fields(), guid=str(nid))
+
+
 # -----------------------------
 # Main logic
 # -----------------------------
@@ -947,14 +1069,38 @@ def gather_for_term(
     )
 
 
-def save_config(config_path: Path, deck_id: int, model_id: int, deck_name: str):
-    data = {"deck_id": deck_id, "model_id": model_id, "deck_name": deck_name}
+def save_config(
+    config_path: Path, deck_id: int, model_id: int, deck_name: str, mode: InputMode
+) -> None:
+    data = {
+        "deck_id": deck_id,
+        "model_id": model_id,
+        "deck_name": deck_name,
+        "mode": mode.value,
+    }
     config_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def load_config(config_path: Path) -> Tuple[int, int, str]:
+def load_config(config_path: Path) -> Tuple[int, int, str, InputMode, bool]:
     j = json.loads(config_path.read_text(encoding="utf-8"))
-    return int(j["deck_id"]), int(j["model_id"]), str(j["deck_name"])  # type: ignore
+    mode_raw = j.get("mode")
+    missing_mode = "mode" not in j
+    if mode_raw is None:
+        mode = InputMode.VOCABULARY
+    else:
+        try:
+            mode = InputMode(mode_raw)
+        except ValueError as exc:  # pragma: no cover - config corrupted
+            raise BuildError(
+                f"Unsupported mode '{mode_raw}' in config {config_path}. Delete the config or build a new deck."
+            ) from exc
+    return (
+        int(j["deck_id"]),
+        int(j["model_id"]),
+        str(j["deck_name"]),
+        mode,
+        missing_mode,
+    )
 
 
 def run_builder(
@@ -977,48 +1123,84 @@ def run_builder(
     if params.new_deck or not config_path.exists():
         deck_id = random.randrange(1 << 30, 1 << 31)
         model_id = random.randrange(1 << 30, 1 << 31)
-        save_config(config_path, deck_id, model_id, deck_name)
+        save_config(config_path, deck_id, model_id, deck_name, params.mode)
         reporter.info(f"New deck config saved to {config_path}")
     else:
-        deck_id, model_id, saved_deck_name = load_config(config_path)
+        deck_id, model_id, saved_deck_name, saved_mode, missing_mode = load_config(config_path)
+        if params.mode != saved_mode:
+            raise BuildError(
+                "Config mode mismatch: the existing config was created for "
+                f"'{saved_mode.value}' but the current build requested '{params.mode.value}'. "
+                "Use --new-deck or provide a different config file."
+            )
         if deck_name == DEFAULT_DECK_NAME:
             deck_name = saved_deck_name
+        if missing_mode or deck_name != saved_deck_name:
+            save_config(config_path, deck_id, model_id, deck_name, params.mode)
         reporter.info(f"Loaded existing config from {config_path}")
 
     deck = genanki.Deck(deck_id, deck_name)
-    model = build_model(model_id)
-
-    terms = read_csv_single_column(csv_file)
-    if not terms:
-        raise BuildError("No terms found in CSV. Exiting.", exit_code=0)
 
     media_files: List[str] = []
-    card_data_list: List[CardData] = []
-
-    reporter.progress_start(len(terms), description="Fetching data...")
-    debug_logger = reporter.debug if params.debug else None
-    try:
-        for term in terms:
-            cd = gather_for_term(term, media_dir, debug=params.debug, logger=debug_logger)
-            card_data_list.append(cd)
-            if cd.image_filename:
-                media_files.append(str(media_dir / cd.image_filename))
-            if cd.audio_filename:
-                media_files.append(str(media_dir / cd.audio_filename))
-            if cd.sentence_audio_filename:
-                media_files.append(str(media_dir / cd.sentence_audio_filename))
-            reporter.progress_advance()
-    finally:
-        reporter.progress_finish()
-
     added = 0
-    for cd in card_data_list:
-        note = make_note(model, cd)
+
+    if params.mode is InputMode.VOCABULARY:
+        model = build_model(model_id)
+        terms = read_csv_single_column(csv_file)
+        if not terms:
+            raise BuildError("No terms found in CSV. Exiting.", exit_code=0)
+
+        card_data_list: List[CardData] = []
+
+        reporter.progress_start(len(terms), description="Fetching data...")
+        debug_logger = reporter.debug if params.debug else None
         try:
-            deck.add_note(note)
-            added += 1
-        except Exception as e:
-            reporter.warning(f"Skipped note for '{cd.term}': {e}")
+            for term in terms:
+                cd = gather_for_term(
+                    term, media_dir, debug=params.debug, logger=debug_logger
+                )
+                card_data_list.append(cd)
+                if cd.image_filename:
+                    media_files.append(str(media_dir / cd.image_filename))
+                if cd.audio_filename:
+                    media_files.append(str(media_dir / cd.audio_filename))
+                if cd.sentence_audio_filename:
+                    media_files.append(str(media_dir / cd.sentence_audio_filename))
+                reporter.progress_advance()
+        finally:
+            reporter.progress_finish()
+
+        for cd in card_data_list:
+            note = make_note(model, cd)
+            try:
+                deck.add_note(note)
+                added += 1
+            except Exception as e:
+                reporter.warning(f"Skipped note for '{cd.term}': {e}")
+
+        total_terms = len(terms)
+
+    else:
+        model = build_grammar_model(model_id)
+        grammar_cards = read_grammar_csv(csv_file)
+        if not grammar_cards:
+            raise BuildError("No grammar entries found in CSV. Exiting.", exit_code=0)
+
+        reporter.progress_start(len(grammar_cards), description="Adding grammar notes...")
+        try:
+            for gc in grammar_cards:
+                note = make_grammar_note(model, gc)
+                try:
+                    deck.add_note(note)
+                    added += 1
+                except Exception as e:
+                    reporter.warning(f"Skipped grammar note for '{gc.question}': {e}")
+                finally:
+                    reporter.progress_advance()
+        finally:
+            reporter.progress_finish()
+
+        total_terms = len(grammar_cards)
 
     apkg_name = f"{safe_filename(deck_name)}.apkg"
     apkg_path = out_dir / apkg_name
@@ -1034,15 +1216,18 @@ def run_builder(
         model_id=model_id,
         apkg_path=apkg_path,
         config_path=config_path,
-        total_terms=len(terms),
+        total_terms=total_terms,
         notes_added=added,
         media_files=media_files,
+        mode=params.mode,
     )
 
 
 @app.command()
 def build(
-    csv_path: str = typer.Option(..., prompt=True, help="Path to CSV with one Japanese term per row."),
+    csv_path: str = typer.Option(
+        ..., prompt=True, help="Path to CSV. Vocabulary mode expects one term per row; grammar mode expects question/explanation/example columns."
+    ),
     output_dir: str = typer.Option(
         "./out", prompt="Output directory", help="Where to save the .apkg and media."
     ),
@@ -1056,8 +1241,15 @@ def build(
     debug: bool = typer.Option(
         False, "--debug", help="Print summarized API responses and parsed text values."
     ),
-): 
-    """Build or append an Anki deck from a CSV list of Japanese terms."""
+    mode: InputMode = typer.Option(
+        InputMode.VOCABULARY,
+        "--mode",
+        prompt="Input mode",
+        case_sensitive=False,
+        help="Choose 'vocabulary' for enriched word cards or 'grammar' for explanation cards.",
+    ),
+):
+    """Build or append an Anki deck from a CSV source of Japanese vocabulary or grammar prompts."""
     params = BuildParams(
         csv_path=Path(csv_path),
         output_dir=Path(output_dir),
@@ -1065,6 +1257,7 @@ def build(
         deck_name=deck_name,
         config_path=Path(config) if config else None,
         debug=debug,
+        mode=mode,
     )
     reporter = RichBuildReporter(console)
     try:
@@ -1080,6 +1273,7 @@ def build(
     table = Table(title="Build Summary", show_lines=True)
     table.add_column("Metric", justify="right")
     table.add_column("Value", justify="left")
+    table.add_row("Mode", result.mode.value.title())
     table.add_row("Terms in CSV", str(result.total_terms))
     table.add_row("Notes added", str(result.notes_added))
     table.add_row("Media files", str(len(result.media_files)))
