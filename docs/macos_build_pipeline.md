@@ -48,7 +48,9 @@ on macOS 26 or newer with an Apple-provided Python 3.11+ universal build.
    pip install -r requirements-macos.txt
    ```
    The `requirements-macos.txt` file can be generated with `pip freeze` after a
-   successful build to make future runs reproducible.
+   successful build to make future runs reproducible. The list includes gTTS so
+   both vocabulary pronunciations and grammar example audio are available in the
+   packaged app.
 
 ## 2. Building the application bundle
 
