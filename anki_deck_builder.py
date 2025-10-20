@@ -121,9 +121,19 @@ class GrammarCardData:
     explanation: str = ""
     example_jp: str = ""
     example_en: str = ""
+    example_audio_filename: str = ""
 
     def to_fields(self) -> List[str]:
-        return [self.question, self.explanation, self.example_jp, self.example_en]
+        audio_tag = (
+            f"[sound:{self.example_audio_filename}]" if self.example_audio_filename else ""
+        )
+        return [
+            self.question,
+            self.explanation,
+            self.example_jp,
+            audio_tag,
+            self.example_en,
+        ]
 
 
 # -----------------------------
@@ -948,12 +958,14 @@ def build_grammar_model(
     .question { font-family: 'Hiragino Kaku Gothic Pro', 'Meiryo', 'Noto Sans JP', sans-serif; font-size: 28px; }
     .example { margin-top: 12px; font-size: 18px; }
     .explanation { margin-top: 16px; font-size: 18px; }
+    .audio { margin-top: 8px; font-size: 18px; }
     .card { text-align: left; }
     """
     fields = [
         {"name": "Question"},
         {"name": "Explanation"},
         {"name": "ExampleJP"},
+        {"name": "ExampleAudio"},
         {"name": "ExampleEN"},
     ]
     templates = [
@@ -971,6 +983,7 @@ def build_grammar_model(
   <hr id='answer'>
   <div class='explanation'><b>解説:</b> {{Explanation}}</div>
   {{#ExampleJP}}<div class='example'><b>例文:</b> {{ExampleJP}}</div>{{/ExampleJP}}
+  {{#ExampleAudio}}<div class='audio'>{{ExampleAudio}}</div>{{/ExampleAudio}}
   {{#ExampleEN}}<div class='example'><b>English:</b> {{ExampleEN}}</div>{{/ExampleEN}}
 </div>
 """,
@@ -1199,6 +1212,10 @@ def run_builder(
         reporter.progress_start(len(grammar_cards), description="Adding grammar notes...")
         try:
             for gc in grammar_cards:
+                example_audio = generate_sentence_audio(gc.example_jp, media_dir)
+                gc.example_audio_filename = example_audio
+                if example_audio:
+                    media_files.append(str(media_dir / example_audio))
                 note = make_grammar_note(model, gc)
                 try:
                     deck.add_note(note)

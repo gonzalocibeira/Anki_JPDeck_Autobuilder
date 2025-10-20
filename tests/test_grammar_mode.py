@@ -29,6 +29,7 @@ def test_read_grammar_csv_parses_header(tmp_path: Path) -> None:
     assert row.explanation == "It means 'to be'"
     assert row.example_jp == "これはペンです"
     assert row.example_en == "This is a pen"
+    assert row.example_audio_filename == ""
 
 
 def test_run_builder_grammar_mode_skips_network(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -53,10 +54,24 @@ def test_run_builder_grammar_mode_skips_network(tmp_path: Path, monkeypatch: pyt
         "fetch_kotobank_ja_definition",
         "fetch_duckduckgo_image",
         "generate_term_audio",
-        "generate_sentence_audio",
         "gather_for_term",
     ]:
         monkeypatch.setattr(builder, name, _fail)
+
+    audio_counter = 0
+
+    def _fake_generate_sentence_audio(sentence: str, media_dir: Path) -> str:
+        nonlocal audio_counter
+        if not sentence:
+            return ""
+        audio_counter += 1
+        filename = f"example_audio_{audio_counter}.mp3"
+        (media_dir / filename).write_bytes(b"audio")
+        return filename
+
+    monkeypatch.setattr(
+        builder, "generate_sentence_audio", _fake_generate_sentence_audio
+    )
 
     created_packages: list[Path] = []
 
@@ -85,7 +100,8 @@ def test_run_builder_grammar_mode_skips_network(tmp_path: Path, monkeypatch: pyt
     assert result.mode is InputMode.GRAMMAR
     assert result.total_terms == 2
     assert result.notes_added == 2
-    assert result.media_files == []
+    expected_audio = tmp_path / "out" / "media" / "example_audio_1.mp3"
+    assert result.media_files == [str(expected_audio)]
     assert result.apkg_path.exists()
     assert created_packages and created_packages[0] == result.apkg_path
 
