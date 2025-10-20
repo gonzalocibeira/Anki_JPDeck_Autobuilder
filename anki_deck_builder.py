@@ -974,7 +974,6 @@ def build_grammar_model(
             "qfmt": """\
 <div class='card'>
   <div class='question'>{{Question}}</div>
-  {{#ExampleJP}}<div class='example'><b>例文:</b> {{ExampleJP}}</div>{{/ExampleJP}}
 </div>
 """,
             "afmt": """\
