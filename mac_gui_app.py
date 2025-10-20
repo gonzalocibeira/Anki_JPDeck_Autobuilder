@@ -132,8 +132,12 @@ class BuilderGUI:
         self.time_var = tk.StringVar(value="Elapsed: 00:00 — Remaining: --")
 
         self._mode_hints = {
-            InputMode.VOCABULARY: "Vocabulary mode: CSV should include vocabulary entries (term, reading, meaning).",
-            InputMode.GRAMMAR: "Grammar mode: CSV should include grammar entries (expression, meaning, notes).",
+            InputMode.VOCABULARY: (
+                "Vocabulary mode: CSV should be a single column of Japanese terms (kanji or kana) with no header row."
+            ),
+            InputMode.GRAMMAR: (
+                "Grammar mode: CSV must include the columns: question, explanation, example_jp, example_en."
+            ),
         }
 
         self._build_thread: threading.Thread | None = None
