@@ -133,10 +133,10 @@ class BuilderGUI:
 
         self._mode_hints = {
             InputMode.VOCABULARY: (
-                "Vocabulary mode: CSV should be a single column of terms with no header row."
+                "Vocabulary mode: CSV should be a single column of Japanese terms (kanji or kana) with no header row."
             ),
             InputMode.GRAMMAR: (
-                "Grammar mode: CSV should include the required columns with header names for grammar entries."
+                "Grammar mode: CSV must include the columns: question, explanation, example_jp, example_en."
             ),
         }
 
