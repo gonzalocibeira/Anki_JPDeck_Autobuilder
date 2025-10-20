@@ -933,7 +933,12 @@ def build_model(model_id: int, name: str = DEFAULT_MODEL_NAME) -> genanki.Model:
 
 def make_note(model: genanki.Model, cd: CardData) -> genanki.Note:
     nid = deterministic_guid(cd.term, cd.reading or "", cd.english or "")
-    return genanki.Note(model=model, fields=cd.to_fields(), guid=str(nid))
+    return genanki.Note(
+        model=model,
+        fields=cd.to_fields(),
+        guid=str(nid),
+        tags=["VOCAB"],
+    )
 
 
 def build_grammar_model(
@@ -976,7 +981,12 @@ def build_grammar_model(
 
 def make_grammar_note(model: genanki.Model, cd: GrammarCardData) -> genanki.Note:
     nid = deterministic_guid(cd.question, cd.example_jp or "", cd.example_en or "")
-    return genanki.Note(model=model, fields=cd.to_fields(), guid=str(nid))
+    return genanki.Note(
+        model=model,
+        fields=cd.to_fields(),
+        guid=str(nid),
+        tags=["GRAMMAR"],
+    )
 
 
 # -----------------------------
