@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="220" viewBox="0 0 600 220" role="img" aria-labelledby="title desc">
+  <title id="title">Anki JP Deck Builder mode selector</title>
+  <desc id="desc">Screenshot-style illustration of the mode dropdown showing Vocabulary and Grammar options</desc>
+  <rect x="0" y="0" width="600" height="220" fill="#f5f5f5" rx="24"/>
+  <rect x="40" y="40" width="520" height="150" fill="#ffffff" stroke="#d0d0d0" stroke-width="3" rx="20"/>
+  <text x="70" y="88" font-family="Arial, Helvetica, sans-serif" font-size="28" fill="#333333">Mode</text>
+  <rect x="160" y="60" width="310" height="60" fill="#f0f4ff" stroke="#4662d4" stroke-width="2" rx="14"/>
+  <text x="180" y="98" font-family="Arial, Helvetica, sans-serif" font-size="26" fill="#1d3aa9">Vocabulary ▼</text>
+  <rect x="160" y="126" width="310" height="52" fill="#ffffff" stroke="#c0c0c0" stroke-width="2" rx="12"/>
+  <text x="180" y="160" font-family="Arial, Helvetica, sans-serif" font-size="24" fill="#333333">Grammar</text>
+  <text x="70" y="190" font-family="Arial, Helvetica, sans-serif" font-size="20" fill="#666666">Switch to Grammar to build explanation cards.</text>
+</svg>
