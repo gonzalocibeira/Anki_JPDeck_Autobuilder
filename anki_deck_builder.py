@@ -324,7 +324,7 @@ def read_grammar_csv(path: Path) -> List[GrammarCardData]:
         sample = f.read(4096)
         f.seek(0)
         try:
-            dialect = csv.Sniffer().sniff(sample)
+            dialect = csv.Sniffer().sniff(sample, delimiters=",;\t|")
         except csv.Error:
             dialect = csv.excel
         reader = csv.reader(f, dialect)

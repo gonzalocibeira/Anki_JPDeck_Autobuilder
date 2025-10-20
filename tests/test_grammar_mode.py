@@ -32,6 +32,24 @@ def test_read_grammar_csv_parses_header(tmp_path: Path) -> None:
     assert row.example_audio_filename == ""
 
 
+def test_read_grammar_csv_handles_multiword_cells(tmp_path: Path) -> None:
+    csv_path = tmp_path / "grammar_multiword.csv"
+    csv_path.write_text(
+        "Question,Explanation,Example JP,Example EN\n"
+        "How do you say...,Explanation text,例文,Translation\n",
+        encoding="utf-8",
+    )
+
+    rows = read_grammar_csv(csv_path)
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.question == "How do you say..."
+    assert row.explanation == "Explanation text"
+    assert row.example_jp == "例文"
+    assert row.example_en == "Translation"
+
+
 def test_run_builder_grammar_mode_skips_network(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     csv_path = tmp_path / "grammar_cards.csv"
     csv_path.write_text(
