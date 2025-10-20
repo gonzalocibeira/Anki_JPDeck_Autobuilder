@@ -1,21 +1,22 @@
 # Anki JP Deck Autobuilder
 
-Anki JP Deck Autobuilder is a command-line utility that assembles multimedia Anki decks from structured CSV files. It can enrich vocabulary lists with readings, glosses, example sentences, native-language definitions, and illustrative imagery gathered from public web APIs (Jisho, Tatoeba, Kotobank dictionary, DuckDuckGo image search, and Japanese Wikipedia). It can also convert grammar study sheets into ready-to-review cards without touching any external network sources. The resulting content is packaged into an `.apkg` file that can be imported directly into Anki.
+Anki JP Deck Autobuilder is a command-line utility that assembles multimedia Anki decks from structured CSV files. It can enrich vocabulary lists with readings, glosses, example sentences, native-language definitions, and illustrative imagery gathered from public web APIs (Jisho, Tatoeba, Kotobank dictionary, DuckDuckGo image search, and Japanese Wikipedia). It can also convert grammar study sheets into ready-to-review cards, synthesizing audio for each Japanese example with gTTS. The resulting content is packaged into an `.apkg` file that can be imported directly into Anki.
 
 ## Features
 
 - **Vocabulary CSV ingestion** – Reads a single-column CSV (any common delimiter) containing Japanese terms.
 - **Automated vocabulary enrichment** – Queries several public APIs (Jisho, Tatoeba, Japanese Wikipedia, Kotobank dictionary, and DuckDuckGo image search) to supplement each term with kana readings, English glosses, example sentences, monolingual definitions, and related imagery.
-- **Grammar sheet conversion** – Turns CSV rows into explanation-focused cards using a dedicated grammar model. All grammar processing is performed locally, so no external API calls are made in this mode.
-- **Audio synthesis** – Generates optional Japanese text-to-speech clips for each term using gTTS and bundles them with the deck.
+- **Grammar sheet conversion** – Turns CSV rows into explanation-focused cards using a dedicated grammar model. Grammar text is processed locally; synthesized example audio is fetched via gTTS.
+- **Audio synthesis** – Generates Japanese text-to-speech clips for vocabulary terms and grammar examples using gTTS and bundles them with the deck.
 - **Deck append support** – Reuses stored deck/model IDs so newly generated cards merge with an existing deck when imported into Anki.
 - **Progress feedback** – Displays a Rich-powered progress bar and build summary in the terminal.
 - **Media packaging** – Downloads image assets and bundles them alongside the deck for a ready-to-import `.apkg`.
+- **Consistent tagging** – Vocabulary cards carry a `VOCAB` tag and grammar cards carry a `GRAMMAR` tag for easy filtered reviews in Anki.
 
 ## Requirements
 
 - Python 3.8 or newer (Python 3.10+ recommended for packaging on macOS).
-- Internet access (the script performs live API calls for each term).
+- Internet access (the script performs live API calls for each term and uses gTTS for audio generation).
 - The following Python packages:
   - [`typer[all]`](https://typer.tiangolo.com/)
   - [`rich`](https://rich.readthedocs.io/)
@@ -23,7 +24,7 @@ Anki JP Deck Autobuilder is a command-line utility that assembles multimedia Ank
   - [`genanki`](https://github.com/kerrickstaley/genanki)
   - [`unidecode`](https://github.com/avian2/unidecode)
   - [`python-slugify`](https://github.com/un33k/python-slugify)
-  - [`gTTS`](https://github.com/pndurette/gTTS)
+  - [`gTTS`](https://github.com/pndurette/gTTS) (required for vocabulary pronunciation and grammar example audio)
   - [`PyInstaller`](https://pyinstaller.org/) (for building the macOS app bundle)
 
 ### Installing dependencies
@@ -72,6 +73,7 @@ Running the tool produces the following artifacts inside the chosen output direc
 
 - `Japanese_Auto_Deck.apkg` – The packaged Anki deck file.
 - `media/` – A folder containing any images and synthesized audio clips generated for the cards.
+- Vocabulary notes are tagged `VOCAB`; grammar notes are tagged `GRAMMAR` so you can filter or create custom study decks in Anki.
 - `anki_deck_builder.config.json` – Stores deck/model identifiers (and the last-used mode) so future runs can append to the same Anki deck.
 
 ## How it works (pipeline)
@@ -83,6 +85,8 @@ Running the tool produces the following artifacts inside the chosen output direc
 - `fetch_wikipedia_ja_definition` retrieves the introductory extract from Japanese Wikipedia and trims filler text for a concise definition. If Wikipedia lacks a result, `fetch_kotobank_ja_definition` falls back to the Kotobank 国語辞典 for a short definition.
    - `fetch_duckduckgo_image` searches DuckDuckGo's image index for a representative image, downloading the first suitable thumbnail. The lookup adapts by trying the original term, its reading, and the leading English glosses until an image is found.
    - `generate_term_audio` synthesizes Japanese text-to-speech (if gTTS is installed) so the resulting notes can play back pronunciation audio inside Anki.
+   
+   Grammar rows skip the external dictionary/image lookups but call `generate_grammar_audio` to synthesize gTTS clips for each example sentence.
 3. **Assemble card data** – The collected fields are wrapped in a `CardData` dataclass, which formats the Anki note fields (including an `<img>` tag when an image is available).
 4. **Configure deck** – If `--new-deck` is enabled (default), fresh deck/model IDs are generated and persisted to `anki_deck_builder.config.json`. Otherwise, existing IDs are loaded so new notes merge with an existing deck on import.
 5. **Build notes** – The script iterates over the enriched cards, creating `genanki.Note` instances using the vocabulary model. Grammar rows use a dedicated grammar model with a separate layout.
@@ -91,10 +95,10 @@ Running the tool produces the following artifacts inside the chosen output direc
 
 ## Grammar card layout
 
-Grammar mode uses a dedicated Anki note model (`JP Grammar Concept (MVP)`) that presents concise explanations:
+Grammar mode uses a dedicated Anki note model (`JP Grammar Concept (MVP)`) that presents concise explanations and audio playback:
 
-- **Front** – Displays the grammar question/prompt (`Question`) and, when provided, the Japanese example sentence.
-- **Back** – Repeats the question, adds the explanation prefixed with **解説**, and shows any supplied Japanese example and its English translation. No media fields are included, keeping the cards lightweight and fully offline.
+- **Front** – Displays the grammar question/prompt (`Question`), the Japanese example sentence, and an embedded audio player sourced from gTTS output when available.
+- **Back** – Repeats the question, adds the explanation prefixed with **解説**, and shows the Japanese example with its English translation alongside the same audio clip. Grammar notes carry the `GRAMMAR` tag by default.
 
 ## Usage
 
@@ -117,7 +121,7 @@ When executed, Typer will prompt for any missing options. The command supports t
 
 ### Switching between vocabulary and grammar
 
-- **CLI** – Pass `--mode grammar` (or `--mode vocabulary`) to select the desired workflow. When omitted, Typer will prompt for the mode interactively.
+- **CLI** – Pass `--mode grammar` (or `--mode vocabulary`) to select the desired workflow. When omitted, Typer will prompt for the mode interactively. Grammar mode now generates gTTS audio for each Japanese example sentence, so confirm you have network connectivity when running grammar builds.
 - **GUI** – Use the *Mode* dropdown near the top of the window to toggle between vocabulary and grammar builds. Vocabulary mode highlights the dropdown in blue; selecting *Grammar* switches the hints displayed under the file selector.
 
 ![Mode dropdown in the macOS GUI showing Vocabulary and Grammar options](docs/gui-mode-dropdown.svg)
@@ -168,14 +172,14 @@ The config file is a simple JSON document that stores identifiers used by Anki t
 ## Error handling & logging
 
 - API failures are logged to the console in yellow and gracefully skipped, so the build continues with whatever data was retrieved.
-- If the optional gTTS dependency is missing, the script prints a clear installation hint and continues building the deck without audio.
+- If gTTS is missing, the script prints a clear installation hint and continues building the deck without vocabulary pronunciation or grammar example audio.
 - If no terms are found in the CSV, the script exits without creating an output deck.
 - Missing CSV files trigger an error message and exit code 1.
 
 ## Limitations
 
 - The tool depends on the uptime and rate limits of third-party APIs (Jisho, Tatoeba, Kotobank dictionary, Japanese Wikipedia, DuckDuckGo image search).
-- Vocabulary mode uses a single card template (front: expression/reading/image, back: English gloss, sentences, definition). Grammar mode uses a separate explanation-first template without images or audio.
+- Vocabulary mode uses a single card template (front: expression/reading/image, back: English gloss, sentences, definition). Grammar mode uses a separate explanation-first template without images; audio clips are synthesized with gTTS.
 - Definitions and example sentences may not always be available for every term.
 
 ## Development & testing
