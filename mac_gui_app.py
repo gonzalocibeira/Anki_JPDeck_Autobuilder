@@ -12,6 +12,7 @@ from anki_deck_builder import (
     BuildParams,
     BuildResult,
     DEFAULT_DECK_NAME,
+    InputMode,
     NullBuildReporter,
     run_builder,
 )
@@ -121,8 +122,19 @@ class BuilderGUI:
         self.deck_name_var = tk.StringVar(value=DEFAULT_DECK_NAME)
         self.new_deck_var = tk.BooleanVar(value=True)
         self.config_path_var = tk.StringVar()
+        self._mode_display = {
+            InputMode.VOCABULARY: "Vocabulary",
+            InputMode.GRAMMAR: "Grammar",
+        }
+        self._display_to_mode = {display: mode for mode, display in self._mode_display.items()}
+        self.mode_var = tk.StringVar(value=self._mode_display[InputMode.VOCABULARY])
         self.status_var = tk.StringVar(value="Idle")
         self.time_var = tk.StringVar(value="Elapsed: 00:00 — Remaining: --")
+
+        self._mode_hints = {
+            InputMode.VOCABULARY: "Vocabulary mode: CSV should include vocabulary entries (term, reading, meaning).",
+            InputMode.GRAMMAR: "Grammar mode: CSV should include grammar entries (expression, meaning, notes).",
+        }
 
         self._build_thread: threading.Thread | None = None
 
@@ -150,41 +162,52 @@ class BuilderGUI:
         csv_entry.grid(column=1, row=1, sticky="ew", **padding)
         ttk.Button(frame, text="Browse", command=self._choose_csv).grid(column=2, row=1, **padding)
 
+        # Mode selector
+        ttk.Label(frame, text="Mode:").grid(column=0, row=2, sticky="w", **padding)
+        self.mode_combo = ttk.Combobox(
+            frame,
+            state="readonly",
+            textvariable=self.mode_var,
+            values=[self._mode_display[InputMode.VOCABULARY], self._mode_display[InputMode.GRAMMAR]],
+        )
+        self.mode_combo.grid(column=1, row=2, sticky="ew", **padding)
+        self.mode_combo.bind("<<ComboboxSelected>>", self._on_mode_change)
+
         # Output directory
-        ttk.Label(frame, text="Output Directory:").grid(column=0, row=2, sticky="w", **padding)
+        ttk.Label(frame, text="Output Directory:").grid(column=0, row=3, sticky="w", **padding)
         output_entry = ttk.Entry(frame, textvariable=self.output_dir_var, width=40)
-        output_entry.grid(column=1, row=2, sticky="ew", **padding)
-        ttk.Button(frame, text="Browse", command=self._choose_output_dir).grid(column=2, row=2, **padding)
+        output_entry.grid(column=1, row=3, sticky="ew", **padding)
+        ttk.Button(frame, text="Browse", command=self._choose_output_dir).grid(column=2, row=3, **padding)
 
         # Deck name
-        ttk.Label(frame, text="Deck Name:").grid(column=0, row=3, sticky="w", **padding)
-        ttk.Entry(frame, textvariable=self.deck_name_var, width=40).grid(column=1, row=3, sticky="ew", **padding)
+        ttk.Label(frame, text="Deck Name:").grid(column=0, row=4, sticky="w", **padding)
+        ttk.Entry(frame, textvariable=self.deck_name_var, width=40).grid(column=1, row=4, sticky="ew", **padding)
 
         # New deck toggle
         ttk.Checkbutton(frame, text="Create new deck", variable=self.new_deck_var).grid(
-            column=1, row=4, sticky="w", **padding
+            column=1, row=5, sticky="w", **padding
         )
 
         # Config path (optional)
-        ttk.Label(frame, text="Config Path (optional):").grid(column=0, row=5, sticky="w", **padding)
-        ttk.Entry(frame, textvariable=self.config_path_var, width=40).grid(column=1, row=5, sticky="ew", **padding)
-        ttk.Button(frame, text="Browse", command=self._choose_config).grid(column=2, row=5, **padding)
+        ttk.Label(frame, text="Config Path (optional):").grid(column=0, row=6, sticky="w", **padding)
+        ttk.Entry(frame, textvariable=self.config_path_var, width=40).grid(column=1, row=6, sticky="ew", **padding)
+        ttk.Button(frame, text="Browse", command=self._choose_config).grid(column=2, row=6, **padding)
 
         # Status label
-        ttk.Label(frame, textvariable=self.status_var).grid(column=0, row=6, columnspan=3, sticky="w", **padding)
+        ttk.Label(frame, textvariable=self.status_var).grid(column=0, row=7, columnspan=3, sticky="w", **padding)
 
         # Time label
         ttk.Label(frame, textvariable=self.time_var).grid(
-            column=0, row=7, columnspan=3, sticky="w", **padding
+            column=0, row=8, columnspan=3, sticky="w", **padding
         )
 
         # Progress bar
         self.progress = ttk.Progressbar(frame, orient="horizontal", mode="determinate")
-        self.progress.grid(column=0, row=8, columnspan=3, sticky="ew", **padding)
+        self.progress.grid(column=0, row=9, columnspan=3, sticky="ew", **padding)
 
         # Build button
         self.build_button = ttk.Button(frame, text="Build", command=self._start_build)
-        self.build_button.grid(column=0, row=9, columnspan=3, sticky="ew", **padding)
+        self.build_button.grid(column=0, row=10, columnspan=3, sticky="ew", **padding)
 
         frame.columnconfigure(1, weight=1)
 
@@ -228,6 +251,9 @@ class BuilderGUI:
         config_value = self.config_path_var.get().strip()
         config_path = Path(config_value).expanduser() if config_value else None
 
+        mode_display = self.mode_var.get()
+        mode = self._display_to_mode.get(mode_display, InputMode.VOCABULARY)
+
         params = BuildParams(
             csv_path=csv_path,
             output_dir=output_dir,
@@ -235,12 +261,14 @@ class BuilderGUI:
             deck_name=deck_name,
             config_path=config_path,
             debug=False,
+            mode=mode,
         )
 
         reporter = TkBuildReporter(self.root, self.status_var, self.progress, self.time_var)
         self.status_var.set("Starting build...")
         self.progress.config(value=0)
         self.build_button.config(state=tk.DISABLED)
+        self.mode_combo.config(state="disabled")
 
         def worker() -> None:
             try:
@@ -260,6 +288,7 @@ class BuilderGUI:
     def _finalize_build(self) -> None:
         def finalize() -> None:
             self.build_button.config(state=tk.NORMAL)
+            self.mode_combo.config(state="readonly")
             self._build_thread = None
         self.root.after(0, finalize)
 
@@ -281,6 +310,12 @@ class BuilderGUI:
                 self.status_var.set(message)
                 messagebox.showinfo("Build finished", message)
         self.root.after(0, notify)
+
+    def _on_mode_change(self, *_: object) -> None:
+        mode = self._display_to_mode.get(self.mode_var.get(), InputMode.VOCABULARY)
+        hint = self._mode_hints.get(mode)
+        if hint and not (self._build_thread and self._build_thread.is_alive()):
+            self.status_var.set(hint)
 
 
 def main() -> None:
