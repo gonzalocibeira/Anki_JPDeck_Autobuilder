@@ -1230,8 +1230,16 @@ def run_builder(
 
     apkg_name = f"{safe_filename(deck_name)}.apkg"
     apkg_path = out_dir / apkg_name
+    validated_media_files: List[str] = []
+    for media_path_str in media_files:
+        media_path = Path(media_path_str)
+        if media_path.exists():
+            validated_media_files.append(media_path_str)
+        else:
+            reporter.warning(f"Missing media file skipped: {media_path_str}")
+
     pkg = genanki.Package(deck)
-    pkg.media_files = media_files
+    pkg.media_files = validated_media_files
     pkg.write_to_file(str(apkg_path))
 
     reporter.info(f"Deck package created at {apkg_path}")
@@ -1244,7 +1252,7 @@ def run_builder(
         config_path=config_path,
         total_terms=total_terms,
         notes_added=added,
-        media_files=media_files,
+        media_files=validated_media_files,
         mode=params.mode,
     )
 
