@@ -26,6 +26,7 @@ Anki JP Deck Autobuilder is a command-line utility that assembles multimedia Ank
   - [`python-slugify`](https://github.com/un33k/python-slugify)
   - [`gTTS`](https://github.com/pndurette/gTTS) (required for vocabulary pronunciation and grammar example audio)
   - [`PyInstaller`](https://pyinstaller.org/) (for building the macOS app bundle)
+  - **Optional:** [`fugashi[unidic-lite]`](https://github.com/polm/fugashi) (Japanese tokenizer with a bundled dictionary). When installed, Tatoeba example filtering prefers sentences containing the exact target token (e.g., rejecting 「いくら」 when querying 「いく」).
 
 ### Installing dependencies
 
@@ -33,6 +34,8 @@ Anki JP Deck Autobuilder is a command-line utility that assembles multimedia Ank
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\\Scripts\\activate
 pip install typer[all] rich requests genanki unidecode python-slugify gTTS PyInstaller
+# Optional tokenizer for better example-sentence filtering
+pip install "fugashi[unidic-lite]"
 ```
 
 ## Input expectations

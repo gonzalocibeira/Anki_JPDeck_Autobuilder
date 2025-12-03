@@ -16,6 +16,7 @@ Requires: pip install typer[all] rich requests genanki unidecode python-slugify
 from __future__ import annotations
 
 import csv
+import importlib
 import hashlib
 import json
 import os
@@ -38,7 +39,32 @@ try:
     from gtts import gTTS  # type: ignore
 except ModuleNotFoundError:  # pragma: no cover - handled gracefully for optional deps
     gTTS = None  # type: ignore
-import typer
+
+typer_spec = importlib.util.find_spec("typer")
+if typer_spec is not None:
+    typer = importlib.import_module("typer")
+else:  # pragma: no cover - exercised when typer is not installed
+    class _DummyTyperModule:
+        class Exit(Exception):
+            def __init__(self, code: int = 0):
+                super().__init__(code)
+                self.exit_code = code
+
+        class Typer:
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                return None
+
+            def command(self, *args: Any, **kwargs: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+                def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+                    return func
+
+                return decorator
+
+        @staticmethod
+        def Option(default: Any = None, *args: Any, **kwargs: Any) -> Any:
+            return default
+
+    typer = _DummyTyperModule()  # type: ignore
 from rich.console import Console
 from rich.progress import (
     Progress,
@@ -73,6 +99,9 @@ KOTOBANK_SEARCH_URL = "https://kotobank.jp/s/{term}"
 WIKIPEDIA_JA_API = "https://ja.wikipedia.org/w/api.php"
 WIKTIONARY_JA_API = "https://ja.wiktionary.org/w/api.php"
 DUCKDUCKGO_BASE = "https://duckduckgo.com/"
+
+_jp_tokenizer_initialized = False
+_jp_tokenizer: Optional[Any] = None
 
 DEFAULT_MODEL_NAME = "JP Word w/ Image + Examples (MVP)"
 DEFAULT_GRAMMAR_MODEL_NAME = "JP Grammar Concept (MVP)"
@@ -417,6 +446,56 @@ def _require_requests() -> None:
         )
 
 
+def _get_japanese_tokenizer() -> Optional[Any]:
+    global _jp_tokenizer_initialized, _jp_tokenizer
+
+    if _jp_tokenizer_initialized:
+        return _jp_tokenizer
+
+    _jp_tokenizer_initialized = True
+    spec = importlib.util.find_spec("fugashi")
+    if spec is None:
+        return None
+
+    fugashi = importlib.import_module("fugashi")
+    try:
+        _jp_tokenizer = fugashi.Tagger()
+    except Exception as exc:  # pragma: no cover - defensive logging
+        console.log(f"[yellow]Japanese tokenizer unavailable: {exc}")
+        _jp_tokenizer = None
+    return _jp_tokenizer
+
+
+def _token_matches_term(token: Any, term: str) -> bool:
+    surface = getattr(token, "surface", "") or ""
+    if surface == term:
+        return True
+
+    lemma = getattr(token, "lemma", None)
+    if isinstance(lemma, str) and lemma == term:
+        return True
+
+    feature = getattr(token, "feature", None)
+    if isinstance(feature, (list, tuple)) and len(feature) > 6:
+        dictionary_form = feature[6] or ""
+        if dictionary_form == term:
+            return True
+
+    return False
+
+
+def _sentence_contains_term(tokenizer: Any, sentence: str, term: str) -> Optional[bool]:
+    try:
+        tokens = list(tokenizer(sentence))
+    except Exception:  # pragma: no cover - fallback when tokenizer fails unexpectedly
+        return None
+
+    for token in tokens:
+        if _token_matches_term(token, term):
+            return True
+    return False
+
+
 def _require_gtts() -> None:
     if gTTS is None:  # pragma: no cover - triggered only when dependency missing
         raise RuntimeError(
@@ -574,12 +653,19 @@ def fetch_tatoeba_example(
         if not isinstance(results, list):
             return candidates
 
+        tokenizer = _get_japanese_tokenizer()
+
         for res in results:
             if not isinstance(res, dict):
                 continue
             jp_text = (res.get("text") or "").strip()
             if not jp_text:
                 continue
+            token_match: Optional[bool] = None
+            if tokenizer is not None:
+                token_match = _sentence_contains_term(tokenizer, jp_text, term)
+                if token_match is False:
+                    continue
             translations = res.get("translations")
             english_texts: List[str] = []
 
@@ -611,14 +697,15 @@ def fetch_tatoeba_example(
 
             jp_length = len(re.sub(r"\s+", "", jp_text))
             for en_text in english_texts:
-                candidates.append(
-                    {
-                        "jp": jp_text,
-                        "en": en_text,
-                        "length": jp_length,
-                        "native": native,
-                    }
-                )
+                candidate = {
+                    "jp": jp_text,
+                    "en": en_text,
+                    "length": jp_length,
+                    "native": native,
+                }
+                if token_match is not None:
+                    candidate["token_match"] = token_match
+                candidates.append(candidate)
         return candidates
 
     def _perform_request(extra_params: Dict[str, Any]) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
@@ -695,9 +782,11 @@ def fetch_tatoeba_example(
 
         preferred = [c for c in all_candidates if c.get("native")]
         search_pool = preferred if preferred else all_candidates
-        best = max(search_pool, key=lambda c: c.get("length", 0))
+        validated = [c for c in search_pool if c.get("token_match") is True]
+        effective_pool = validated if validated else search_pool
+        best = max(effective_pool, key=lambda c: c.get("length", 0))
         if best.get("length", 0) > 20:
-            short_candidates = [c for c in search_pool if c.get("length", 0) <= 20]
+            short_candidates = [c for c in effective_pool if c.get("length", 0) <= 20]
             if short_candidates:
                 best = max(short_candidates, key=lambda c: c.get("length", 0))
         return best.get("jp", ""), best.get("en", "")
