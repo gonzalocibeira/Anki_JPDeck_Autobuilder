@@ -24,6 +24,7 @@ import random
 import re
 import sys
 import tempfile
+from datetime import datetime
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -65,19 +66,121 @@ else:  # pragma: no cover - exercised when typer is not installed
             return default
 
     typer = _DummyTyperModule()  # type: ignore
-from rich.console import Console
-from rich.progress import (
-    Progress,
-    SpinnerColumn,
-    TextColumn,
-    BarColumn,
-    TimeElapsedColumn,
-    TimeRemainingColumn,
-)
-from rich.table import Table
-from slugify import slugify
-import genanki
-from unidecode import unidecode
+
+rich_spec = importlib.util.find_spec("rich")
+if rich_spec is not None:
+    from rich.console import Console
+    from rich.progress import (
+        Progress,
+        SpinnerColumn,
+        TextColumn,
+        BarColumn,
+        TimeElapsedColumn,
+        TimeRemainingColumn,
+    )
+    from rich.table import Table
+else:  # pragma: no cover - exercised when rich is not installed
+    class Console:  # type: ignore
+        def __init__(self, *args: Any, record: bool = False, **kwargs: Any) -> None:
+            self._records: List[str] = []
+            self.record = record
+
+        def print(self, message: Any) -> None:
+            self._records.append(str(message))
+
+        def log(self, message: Any) -> None:
+            self.print(message)
+
+        def export_text(self, clear: bool = False, styles: bool = False) -> str:  # noqa: ARG002
+            text = "\n".join(self._records)
+            if clear:
+                self._records.clear()
+            return text
+
+    class _DummyColumn:  # type: ignore
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            return None
+
+    class Progress:  # type: ignore
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            return None
+
+        def __enter__(self) -> "Progress":
+            return self
+
+        def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:  # noqa: ANN401
+            return None
+
+        def add_task(self, description: str, total: int) -> int:  # noqa: ARG002
+            return 0
+
+        def advance(self, task_id: int, advance: int = 1) -> None:  # noqa: ARG002
+            return None
+
+    SpinnerColumn = TextColumn = BarColumn = TimeElapsedColumn = TimeRemainingColumn = _DummyColumn
+
+    class Table:  # type: ignore
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            self.rows: List[List[str]] = []
+
+        def add_column(self, *args: Any, **kwargs: Any) -> None:  # noqa: ARG002
+            return None
+
+        def add_row(self, *values: Any) -> None:
+            self.rows.append([str(v) for v in values])
+
+        def __str__(self) -> str:
+            return "\n".join(" | ".join(row) for row in self.rows)
+slugify_spec = importlib.util.find_spec("slugify")
+if slugify_spec is not None:
+    from slugify import slugify
+else:  # pragma: no cover - exercised when python-slugify is not installed
+    def slugify(value: str) -> str:
+        return re.sub(r"[^A-Za-z0-9_-]+", "_", value).strip("_")
+
+
+genanki_spec = importlib.util.find_spec("genanki")
+if genanki_spec is not None:
+    import genanki
+else:  # pragma: no cover - exercised when genanki is not installed
+    class _DummyGenankiModel:  # type: ignore
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            return None
+
+    class _DummyGenankiNote:  # type: ignore
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            return None
+
+    class _DummyGenankiDeck:  # type: ignore
+        def __init__(self, deck_id: int, name: str) -> None:  # noqa: ARG002
+            self.notes: List[_DummyGenankiNote] = []
+
+        def add_note(self, note: _DummyGenankiNote) -> None:
+            self.notes.append(note)
+
+    class _DummyGenankiPackage:  # type: ignore
+        def __init__(self, deck: _DummyGenankiDeck) -> None:
+            self.deck = deck
+            self.media_files: List[str] = []
+
+        def write_to_file(self, path: str) -> None:
+            Path(path).touch()
+
+    class _DummyGenankiModule:  # type: ignore
+        Model = _DummyGenankiModel
+        Note = _DummyGenankiNote
+        Deck = _DummyGenankiDeck
+        Package = _DummyGenankiPackage
+
+    genanki = _DummyGenankiModule()
+
+
+unidecode_spec = importlib.util.find_spec("unidecode")
+if unidecode_spec is not None:
+    from unidecode import unidecode
+else:  # pragma: no cover - exercised when unidecode is not installed
+    def unidecode(value: str) -> str:
+        return value
 
 from kotobank_dictionary import extract_first_kotobank_definition
 from wikipedia_utils import clean_wikipedia_extract
@@ -262,14 +365,18 @@ class RichBuildReporter(NullBuildReporter):
         self.console = console
         self._progress: Optional[Progress] = None
         self._task_id: Optional[int] = None
+        self.warnings: List[str] = []
+        self.errors: List[str] = []
 
     def info(self, message: str) -> None:
         self.console.print(f"[green]{message}[/]")
 
     def warning(self, message: str) -> None:
+        self.warnings.append(message)
         self.console.print(f"[yellow]{message}[/]")
 
     def error(self, message: str) -> None:
+        self.errors.append(message)
         self.console.print(f"[red]{message}[/]")
 
     def debug(self, message: str) -> None:
@@ -1346,6 +1453,56 @@ def run_builder(
     )
 
 
+def write_run_log(
+    *,
+    params: BuildParams,
+    reporter: RichBuildReporter,
+    console: Console,
+    result: Optional[BuildResult],
+    failure_message: Optional[str],
+    timestamp: Optional[datetime] = None,
+) -> Path:
+    ts = timestamp or datetime.now()
+    log_filename = f"anki_deck_builder_run_{ts.strftime('%Y%m%d-%H%M%S')}.log"
+    log_path = params.output_dir / log_filename
+
+    summary_lines = [
+        f"Timestamp: {ts.isoformat(timespec='seconds')}",
+        f"Status: {'success' if failure_message is None else 'failed'}",
+        f"Mode: {(result.mode if result else params.mode).value.title()}",
+        f"CSV path: {params.csv_path}",
+        f"Deck name: {result.deck_name if result else params.deck_name}",
+        f"Config path: {(result.config_path if result else params.config_path) or params.output_dir / CONFIG_FILE}",
+        f"Output directory: {params.output_dir}",
+        f"Output package: {result.apkg_path if result else 'n/a'}",
+        f"Total terms: {result.total_terms if result else 'n/a'}",
+        f"Notes added: {result.notes_added if result else 'n/a'}",
+        f"Media files: {len(result.media_files) if result else 'n/a'}",
+    ]
+
+    console_output = console.export_text(clear=False, styles=False).strip()
+
+    error_entries: List[str] = []
+    if reporter.errors:
+        error_entries.extend([f"ERROR: {msg}" for msg in reporter.errors])
+    if reporter.warnings:
+        error_entries.extend([f"WARNING: {msg}" for msg in reporter.warnings])
+    if failure_message:
+        error_entries.append(f"FAILURE: {failure_message}")
+
+    sections = ["=== Build Summary ===", *summary_lines]
+    sections.append("")
+    sections.append("=== Console Output ===")
+    sections.append(console_output or "(no console output recorded)")
+    sections.append("")
+    sections.append("=== Warnings & Errors ===")
+    sections.extend(error_entries or ["No warnings or errors captured."])
+
+    log_text = "\n".join(sections) + "\n"
+    log_path.write_text(log_text, encoding="utf-8")
+    return log_path
+
+
 @app.command()
 def build(
     csv_path: str = typer.Option(
@@ -1383,28 +1540,46 @@ def build(
         mode=mode,
     )
     reporter = RichBuildReporter(console)
+    result: Optional[BuildResult] = None
+    failure_message: Optional[str] = None
+    exit_code = 0
     try:
         result = run_builder(params, reporter)
     except BuildError as exc:
+        failure_message = str(exc)
+        exit_code = exc.exit_code
         console.print(f"[red]{exc}")
-        raise typer.Exit(code=exc.exit_code)
     except Exception as exc:
+        failure_message = f"Unexpected error: {exc}"
+        exit_code = 1
         console.print(f"[red]Unexpected error:[/] {exc}")
-        raise typer.Exit(code=1)
 
     # Summary
-    table = Table(title="Build Summary", show_lines=True)
-    table.add_column("Metric", justify="right")
-    table.add_column("Value", justify="left")
-    table.add_row("Mode", result.mode.value.title())
-    table.add_row("Terms in CSV", str(result.total_terms))
-    table.add_row("Notes added", str(result.notes_added))
-    table.add_row("Media files", str(len(result.media_files)))
-    table.add_row("Output", str(result.apkg_path))
-    table.add_row("Config", str(result.config_path))
-    console.print(table)
+    if not failure_message and result is not None:
+        table = Table(title="Build Summary", show_lines=True)
+        table.add_column("Metric", justify="right")
+        table.add_column("Value", justify="left")
+        table.add_row("Mode", result.mode.value.title())
+        table.add_row("Terms in CSV", str(result.total_terms))
+        table.add_row("Notes added", str(result.notes_added))
+        table.add_row("Media files", str(len(result.media_files)))
+        table.add_row("Output", str(result.apkg_path))
+        table.add_row("Config", str(result.config_path))
+        console.print(table)
 
-    console.print("[green]Done![/] Import the .apkg into Anki. If you used the same config (deck/model IDs), new cards will append into the existing deck.")
+        console.print("[green]Done![/] Import the .apkg into Anki. If you used the same config (deck/model IDs), new cards will append into the existing deck.")
+
+    log_path = write_run_log(
+        params=params,
+        reporter=reporter,
+        console=console,
+        result=result,
+        failure_message=failure_message,
+    )
+    console.print(f"[cyan]Run log saved to[/] {log_path}")
+
+    if failure_message:
+        raise typer.Exit(code=exit_code)
 
     if debug:
         log_path = params.output_dir / "anki_deck_builder_debug_log.txt"

@@ -178,6 +178,7 @@ The config file is a simple JSON document that stores identifiers used by Anki t
 - If gTTS is missing, the script prints a clear installation hint and continues building the deck without vocabulary pronunciation or grammar example audio.
 - If no terms are found in the CSV, the script exits without creating an output deck.
 - Missing CSV files trigger an error message and exit code 1.
+- Every CLI run writes a timestamped log file in the chosen output directory (for example, `anki_deck_builder_run_20240101-120000.log`). It begins with a summary of the run (mode, counts, output paths) and ends with a consolidated list of warnings/errors captured during the build. The console output is also embedded for later review.
 
 ## Limitations
 
