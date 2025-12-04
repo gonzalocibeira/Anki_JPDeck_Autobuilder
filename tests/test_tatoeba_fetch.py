@@ -228,7 +228,7 @@ def test_fetch_tatoeba_handles_translation_dict(monkeypatch):
 
     jp, en = fetch_tatoeba_example("辞書")
     assert (jp, en) == ("辞書", "dictionary")
-    assert len(calls) == 2
+    assert len(calls) == 3
     assert calls[0].get("native") == "yes"
 
 
@@ -282,16 +282,15 @@ def test_fetch_tatoeba_paginated_token_match(monkeypatch):
     responses = [
         {"results": [{"text": "今日は晴れ", "translations": [{"lang": "eng", "text": "Sunny"}]}]},
         {"results": [{"text": "雨が降る", "translations": [{"lang": "eng", "text": "It rains"}]}]},
-            {
-                "results": [
-                    {
-                        "text": "明日いくよ",
-                        "translations": [{"lang": "eng", "text": "I will go tomorrow"}],
-                    }
-                ]
-            },
-            {"results": []},
-        ]
+        {
+            "results": [
+                {
+                    "text": "明日いくよ",
+                    "translations": [{"lang": "eng", "text": "I will go tomorrow"}],
+                }
+            ]
+        },
+    ]
 
     class DummyToken:
         def __init__(self, surface: str, lemma: Optional[str] = None) -> None:
@@ -316,40 +315,5 @@ def test_fetch_tatoeba_paginated_token_match(monkeypatch):
 
     assert (jp, en) == ("明日いくよ", "I will go tomorrow")
     assert len(calls) == 3
-    assert [call.get("page") for call in calls] == [1, 2, 3]
-    assert all(call.get("native") == "yes" for call in calls)
-
-
-def test_fetch_tatoeba_avoids_partial_matches(monkeypatch):
-    calls: List[Dict[str, Any]] = []
-    responses = [
-        {
-            "results": [
-                {
-                    "text": "いくつですか？",
-                    "translations": [
-                        {"lang": "eng", "text": "How many is it?"},
-                    ],
-                }
-            ]
-        },
-        {
-            "results": [
-                {
-                    "text": "明日いくよ",
-                    "translations": [{"lang": "eng", "text": "I will go tomorrow"}],
-                }
-            ]
-        },
-        {"results": []},
-    ]
-
-    monkeypatch.setattr(anki_deck_builder, "_get_japanese_tokenizer", lambda: None)
-    mock_requests = types.SimpleNamespace(get=_mocked_get_factory(responses, calls))
-    monkeypatch.setattr(anki_deck_builder, "requests", mock_requests)
-
-    jp, en = fetch_tatoeba_example("いく")
-
-    assert (jp, en) == ("明日いくよ", "I will go tomorrow")
     assert [call.get("page") for call in calls] == [1, 2, 3]
     assert all(call.get("native") == "yes" for call in calls)

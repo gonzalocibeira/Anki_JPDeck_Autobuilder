@@ -881,10 +881,9 @@ def fetch_tatoeba_example(
     try:
         MAX_TATOEBA_PAGES = 5
 
-        def _search_pages(extra_params: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool, bool]:
+        def _search_pages(extra_params: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
             aggregated: List[Dict[str, Any]] = []
             token_match_found = False
-            contains_match_found = False
             for page in range(1, MAX_TATOEBA_PAGES + 1):
                 payload, candidates = _perform_request({**extra_params, "page": page})
                 aggregated.extend(candidates)
@@ -892,18 +891,15 @@ def fetch_tatoeba_example(
                 if any(c.get("token_match") is True for c in candidates):
                     token_match_found = True
                     break
-                contains_match_found = contains_match_found or any(
-                    c.get("contains_term") for c in candidates
-                )
                 if not results:
                     break
-            return aggregated, token_match_found, contains_match_found
+            return aggregated, token_match_found
 
-        native_candidates, native_match, native_contains = _search_pages({"native": "yes"})
+        native_candidates, native_match = _search_pages({"native": "yes"})
         all_candidates = list(native_candidates)
 
-        if not native_match and not native_contains:
-            fallback_candidates, _, _ = _search_pages({})
+        if not native_match:
+            fallback_candidates, _ = _search_pages({})
             all_candidates.extend(fallback_candidates)
 
         if not all_candidates:
