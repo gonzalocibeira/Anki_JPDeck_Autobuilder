@@ -1,3 +1,4 @@
+import importlib
 import json
 import sys
 import types
@@ -73,6 +74,7 @@ def _install_stub_dependencies() -> None:
 
     if "slugify" not in sys.modules:
         slugify_module = types.ModuleType("slugify")
+        slugify_module.__spec__ = importlib.util.spec_from_loader("slugify", loader=None)
 
         def _slugify(value: str) -> str:
             return value
@@ -82,6 +84,7 @@ def _install_stub_dependencies() -> None:
 
     if "genanki" not in sys.modules:
         genanki_module = types.ModuleType("genanki")
+        genanki_module.__spec__ = importlib.util.spec_from_loader("genanki", loader=None)
 
         class _StubGenanki:
             def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -95,6 +98,7 @@ def _install_stub_dependencies() -> None:
 
     if "unidecode" not in sys.modules:
         unidecode_module = types.ModuleType("unidecode")
+        unidecode_module.__spec__ = importlib.util.spec_from_loader("unidecode", loader=None)
 
         def _unidecode(value: Any) -> str:
             return str(value)
@@ -147,7 +151,9 @@ def test_fetch_tatoeba_prefers_native_and_longest(monkeypatch):
                     "translations": [{"lang": "eng", "text": "long"}],
                 },
             ]
-        }
+        },
+        {"results": []},
+        {"results": []},
     ]
 
     mock_requests = types.SimpleNamespace(get=_mocked_get_factory(responses, calls))
@@ -155,7 +161,7 @@ def test_fetch_tatoeba_prefers_native_and_longest(monkeypatch):
 
     jp, en = fetch_tatoeba_example("猫")
     assert (jp, en) == ("これは 長い 文", "long")
-    assert len(calls) == 1
+    assert len(calls) == 3
     assert calls[0].get("native") == "yes"
 
 
@@ -170,6 +176,7 @@ def test_fetch_tatoeba_falls_back_without_native(monkeypatch):
                 }
             ]
         },
+        {"results": []},
         {
             "results": [
                 {
@@ -182,6 +189,7 @@ def test_fetch_tatoeba_falls_back_without_native(monkeypatch):
                 },
             ]
         },
+        {"results": []},
     ]
 
     mock_requests = types.SimpleNamespace(get=_mocked_get_factory(responses, calls))
@@ -189,9 +197,10 @@ def test_fetch_tatoeba_falls_back_without_native(monkeypatch):
 
     jp, en = fetch_tatoeba_example("犬")
     assert (jp, en) == ("これは 長い サンプル", "long example")
-    assert len(calls) == 2
+    assert len(calls) == 4
     assert calls[0].get("native") == "yes"
-    assert not calls[1].get("native")
+    assert calls[1].get("native") == "yes"
+    assert not calls[2].get("native")
 
 
 def test_fetch_tatoeba_handles_translation_dict(monkeypatch):
@@ -209,7 +218,9 @@ def test_fetch_tatoeba_handles_translation_dict(monkeypatch):
                     },
                 }
             ]
-        }
+        },
+        {"results": []},
+        {"results": []},
     ]
 
     mock_requests = types.SimpleNamespace(get=_mocked_get_factory(responses, calls))
@@ -217,7 +228,7 @@ def test_fetch_tatoeba_handles_translation_dict(monkeypatch):
 
     jp, en = fetch_tatoeba_example("辞書")
     assert (jp, en) == ("辞書", "dictionary")
-    assert len(calls) == 1
+    assert len(calls) == 3
     assert calls[0].get("native") == "yes"
 
 
@@ -264,3 +275,45 @@ def test_fetch_tatoeba_filters_by_token_match(monkeypatch):
     assert (jp, en) == ("明日いくよ", "I will go tomorrow")
     assert len(calls) == 1
     assert calls[0].get("native") == "yes"
+
+
+def test_fetch_tatoeba_paginated_token_match(monkeypatch):
+    calls: List[Dict[str, Any]] = []
+    responses = [
+        {"results": [{"text": "今日は晴れ", "translations": [{"lang": "eng", "text": "Sunny"}]}]},
+        {"results": [{"text": "雨が降る", "translations": [{"lang": "eng", "text": "It rains"}]}]},
+        {
+            "results": [
+                {
+                    "text": "明日いくよ",
+                    "translations": [{"lang": "eng", "text": "I will go tomorrow"}],
+                }
+            ]
+        },
+    ]
+
+    class DummyToken:
+        def __init__(self, surface: str, lemma: Optional[str] = None) -> None:
+            self.surface = surface
+            lemma_value = lemma if lemma is not None else surface
+            self.feature = ["*"] * 7
+            self.feature[6] = lemma_value
+
+    class DummyTokenizer:
+        def __call__(self, text: str):
+            if "いく" in text:
+                return [DummyToken("明日"), DummyToken("いく"), DummyToken("よ")]
+            return [DummyToken(token) for token in text]
+
+    monkeypatch.setattr(
+        anki_deck_builder, "_get_japanese_tokenizer", lambda: DummyTokenizer()
+    )
+    mock_requests = types.SimpleNamespace(get=_mocked_get_factory(responses, calls))
+    monkeypatch.setattr(anki_deck_builder, "requests", mock_requests)
+
+    jp, en = fetch_tatoeba_example("いく")
+
+    assert (jp, en) == ("明日いくよ", "I will go tomorrow")
+    assert len(calls) == 3
+    assert [call.get("page") for call in calls] == [1, 2, 3]
+    assert all(call.get("native") == "yes" for call in calls)
