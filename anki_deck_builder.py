@@ -593,8 +593,11 @@ def _token_matches_term(token: Any, term: str) -> bool:
 
 def _sentence_contains_term(tokenizer: Any, sentence: str, term: str) -> Optional[bool]:
     try:
-        tokens = list(tokenizer(sentence))
+        tokens = list(tokenizer(sentence)) if tokenizer is not None else None
     except Exception:  # pragma: no cover - fallback when tokenizer fails unexpectedly
+        return None
+
+    if tokens is None:
         return None
 
     for token in tokens:
@@ -768,11 +771,9 @@ def fetch_tatoeba_example(
             jp_text = (res.get("text") or "").strip()
             if not jp_text:
                 continue
-            token_match: Optional[bool] = None
-            if tokenizer is not None:
-                token_match = _sentence_contains_term(tokenizer, jp_text, term)
-                if token_match is False:
-                    continue
+            token_match: Optional[bool] = _sentence_contains_term(tokenizer, jp_text, term)
+            if token_match is False:
+                continue
             translations = res.get("translations")
             english_texts: List[str] = []
 
@@ -809,6 +810,7 @@ def fetch_tatoeba_example(
                     "en": en_text,
                     "length": jp_length,
                     "native": native,
+                    "contains_term": term in jp_text,
                 }
                 if token_match is not None:
                     candidate["token_match"] = token_match
@@ -906,12 +908,20 @@ def fetch_tatoeba_example(
         preferred = [c for c in all_candidates if c.get("native")]
         search_pool = preferred if preferred else all_candidates
         validated = [c for c in search_pool if c.get("token_match") is True]
-        effective_pool = validated if validated else search_pool
-        best = max(effective_pool, key=lambda c: c.get("length", 0))
-        if best.get("length", 0) > 20:
-            short_candidates = [c for c in effective_pool if c.get("length", 0) <= 20]
-            if short_candidates:
-                best = max(short_candidates, key=lambda c: c.get("length", 0))
+        contains_term = [c for c in search_pool if c.get("contains_term")]
+        if validated:
+            effective_pool = validated
+            best = max(effective_pool, key=lambda c: c.get("length", 0))
+        elif contains_term:
+            effective_pool = contains_term
+            best = min(effective_pool, key=lambda c: c.get("length", 0))
+        else:
+            effective_pool = search_pool
+            best = max(effective_pool, key=lambda c: c.get("length", 0))
+            if best.get("length", 0) > 20:
+                short_candidates = [c for c in effective_pool if c.get("length", 0) <= 20]
+                if short_candidates:
+                    best = max(short_candidates, key=lambda c: c.get("length", 0))
         return best.get("jp", ""), best.get("en", "")
     except Exception as e:
         console.log(f"[yellow]Tatoeba fetch failed for '{term}': {e}")
